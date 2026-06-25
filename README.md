@@ -1,36 +1,86 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ਪੰਜਾਬ ਦੁਕਾਨ ਪ੍ਰਬੰਧਕ | Punjab Shopkeeper Management System
 
-## Getting Started
+A simple, fast, bilingual (Punjabi + English), mobile-first shop management system tailored for Kirana shops, mobile stores, hardware shops, and general retailers in Punjab, India.
 
-First, run the development server:
+---
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## 🛠️ Technology Stack
+* **Frontend**: Next.js 16 (App Router), TypeScript, Tailwind CSS
+* **Backend**: Server Actions, Route Handlers
+* **Database**: PostgreSQL (with Prisma ORM & pg driver adapter)
+* **Validation**: Zod & React Hook Form
+* **State Management**: Zustand (with localStorage persistence)
+* **Reporting**: Recharts, xlsx (Excel exporter), jspdf (PDF exporter)
+
+---
+
+## ⚙️ Project Structure
+
+```text
+/prisma                # Database schema and seed scripts
+/src/app               # Next.js App Router (dashboard, POS sales, customers, reports)
+/src/components        # Theme providers, navigation bars, desktop sidebar
+/src/hooks             # Bilingual useTranslation dictionary hook
+/src/validation        # Form verification Zod schemas
+/src/db                # Prisma client setup, Repository pattern, and Services
+/src/lib/actions       # Encapsulated Next.js Server Actions
+/src/lib/store         # Local Zustand preferences store
+/src/lib/translations  # Bilingual translation keys (English + Punjabi)
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+---
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 🚀 Running Locally
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Follow these quick commands to spin up the database and run the shop terminal:
 
-## Learn More
+### 1. Install Dependencies
+```bash
+npm install
+```
 
-To learn more about Next.js, take a look at the following resources:
+### 2. Configure Environment
+Rename `.env.example` to `.env` and fill in your PostgreSQL credentials:
+```bash
+DATABASE_URL="postgresql://postgres:YOUR_PASSWORD@localhost:5432/punjab_shopkeeper?schema=public"
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### 3. Spin up PostgreSQL Database (Docker)
+If you prefer running a local PostgreSQL container:
+```bash
+docker compose up -d
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### 4. Create Tables and Seed Data
+Apply the Prisma schema migrations and seed default products (Flour, Sugar, Tea) and accounts:
+```bash
+npx prisma migrate dev --name init
+npx prisma db seed
+```
 
-## Deploy on Vercel
+### 5. Start Development Server
+```bash
+npm run dev
+```
+Open [http://localhost:3000](http://localhost:3000) to access the application.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+---
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## 🔑 Login Credentials
+Log in instantly using the default credentials:
+* **Mobile / Username**: `admin`
+* **Password**: `admin123`
+
+---
+
+## 🧪 Testing Checklist
+Verify system business rules by executing the backend test suite:
+```bash
+npx tsx scratch/run-tests.ts
+```
+The test suite validates:
+1. Prevents negative stock.
+2. Log-timeline for stock history transaction ledgers.
+3. Customer outstanding balance formulas (Opening + Sales - Payments).
+4. Point of Sale checkout atomic flow.
+5. Invoices reversal and cash reconciliation.
