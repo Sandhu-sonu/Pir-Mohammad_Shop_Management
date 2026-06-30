@@ -66,8 +66,17 @@ export class SalesRepository {
   }
 
   static async generateInvoiceNumber(shopId: string): Promise<string> {
+    const settings = await prisma.settings.findUnique({
+      where: { shopId },
+    });
+    const shop = await prisma.shop.findUnique({
+      where: { id: shopId },
+    });
+    const isGst = shop?.gstRegistered && settings?.receiptFormat === 'DETAILED';
+    const prefixStr = isGst ? (settings?.taxPrefix || 'INV-') : (settings?.receiptPrefix || 'RCP-');
+    
     const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-    const prefix = `INV-${todayStr}-`;
+    const prefix = `${prefixStr}${todayStr}-`;
     
     // Find the latest invoice number with today's prefix
     const latestSale = await prisma.sale.findFirst({
@@ -97,16 +106,24 @@ export class SalesRepository {
     const { shopId, customerId, items, discount, paymentMethod, paidAmount, userId } = data;
 
     return prisma.$transaction(async (tx) => {
-      // 1. Validate items and compute totals
+      // 1. Validate items and compute totals (batch query optimized)
       let subTotal = new Prisma.Decimal('0');
       const resolvedItems = [];
 
-      for (const item of items) {
-        const product = await tx.product.findUnique({
-          where: { id: item.productId },
-        });
+      const productIds = items.map(item => item.productId);
+      const products = await tx.product.findMany({
+        where: {
+          id: { in: productIds },
+          isDeleted: false,
+        },
+      });
 
-        if (!product || product.isDeleted) {
+      const productMap = new Map(products.map(p => [p.id, p]));
+
+      for (const item of items) {
+        const product = productMap.get(item.productId);
+
+        if (!product) {
           throw new Error(`Product not found: ${item.productId}`);
         }
 
@@ -233,7 +250,17 @@ export class SalesRepository {
         }
       }
 
-      return sale;
+      // Return populated sale
+      const fullSale = await tx.sale.findUnique({
+        where: { id: sale.id },
+        include: {
+          items: {
+            include: { product: true },
+          },
+          customer: true,
+        },
+      });
+      return fullSale!;
     });
   }
 

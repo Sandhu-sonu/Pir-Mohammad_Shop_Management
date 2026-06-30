@@ -3,8 +3,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslation } from '../../hooks/useTranslation';
-import { createSaleAction, reverseSaleAction, listSalesAction } from '../../lib/actions/sales';
+import { createSaleAction, reverseSaleAction, listSalesAction, getSaleAction } from '../../lib/actions/sales';
+import { addCustomerAction } from '../../lib/actions/customers';
 import { PaymentMethod } from '@prisma/client';
+import { EmptyState } from '../../components/ui/EmptyState';
 import {
   Search,
   ShoppingCart,
@@ -17,7 +19,11 @@ import {
   XCircle,
   X,
   ScanBarcode,
+  ChevronDown,
 } from 'lucide-react';
+
+import { useToastStore } from '../../lib/store/toast';
+import ConfirmDialog from '../../components/ui/ConfirmDialog';
 
 interface SalesClientProps {
   products: any[];
@@ -29,6 +35,7 @@ interface SalesClientProps {
     page: number;
     limit: number;
   };
+  shop: any;
 }
 
 interface CartItem {
@@ -37,8 +44,9 @@ interface CartItem {
   sellingPrice: number;
 }
 
-export default function SalesClient({ products, customers, salesData }: SalesClientProps) {
+export default function SalesClient({ products, customers, salesData, shop }: SalesClientProps) {
   const { t, language } = useTranslation();
+  const { showToast } = useToastStore();
   const router = useRouter();
 
   // Tab state (POS vs Invoices)
@@ -58,8 +66,23 @@ export default function SalesClient({ products, customers, salesData }: SalesCli
   const [invoices, setInvoices] = useState<any[]>(salesData.items);
   const [selectedInvoiceForPrint, setSelectedInvoiceForPrint] = useState<any | null>(null);
 
+  const [showAddCustomerModal, setShowAddCustomerModal] = useState(false);
+  const [newCustomerName, setNewCustomerName] = useState('');
+  const [newCustomerMobile, setNewCustomerMobile] = useState('');
+  const [savingCustomer, setSavingCustomer] = useState(false);
+
   // Focus ref for barcode input
   const barcodeInputRef = useRef<HTMLInputElement>(null);
+
+  const [reversalTarget, setReversalTarget] = useState<{ id: string; invoiceNumber: string } | null>(null);
+  const [showPrintDropdown, setShowPrintDropdown] = useState(false);
+
+  // Formatting helper based on regional settings
+  const formatSymbol = shop?.settings?.currencySymbol || '₹';
+  const decimals = shop?.settings?.decimalPrecision ?? 2;
+  const formatPrice = (value: number) => {
+    return `${formatSymbol}${value.toFixed(decimals)}`;
+  };
 
   // Automatically update paidAmount when cart or payment method changes
   const subTotal = cart.reduce((sum, item) => sum + item.quantity * item.sellingPrice, 0);
@@ -72,6 +95,126 @@ export default function SalesClient({ products, customers, salesData }: SalesCli
       setPaidAmount(total.toString());
     }
   }, [total, paymentMethod]);
+
+  // Caching POS state to local storage for crash/session recovery (Module 5)
+  useEffect(() => {
+    if (cart.length > 0 || selectedCustomerId || Number(discount) > 0 || searchQuery) {
+      localStorage.setItem(
+        'draft_sales_pos',
+        JSON.stringify({
+          cart,
+          selectedCustomerId,
+          discount,
+          paymentMethod,
+          paidAmount,
+          searchQuery,
+          activeTab,
+          savedAt: Date.now(),
+        })
+      );
+    } else {
+      localStorage.removeItem('draft_sales_pos');
+    }
+  }, [cart, selectedCustomerId, discount, paymentMethod, paidAmount, searchQuery, activeTab]);
+
+  // Restoring POS state on approval
+  useEffect(() => {
+    const approved = localStorage.getItem('draft_restore_approved');
+    if (approved === 'true') {
+      const draft = localStorage.getItem('draft_sales_pos');
+      if (draft) {
+        try {
+          const parsed = JSON.parse(draft);
+          const now = Date.now();
+          // Verify 24-hour expiration threshold
+          if (parsed.savedAt && now - parsed.savedAt <= 24 * 60 * 60 * 1000) {
+            if (parsed.cart) setCart(parsed.cart);
+            if (parsed.selectedCustomerId) setSelectedCustomerId(parsed.selectedCustomerId);
+            if (parsed.discount) setDiscount(parsed.discount);
+            if (parsed.paymentMethod) setPaymentMethod(parsed.paymentMethod);
+            if (parsed.paidAmount) setPaidAmount(parsed.paidAmount);
+            if (parsed.searchQuery) setSearchQuery(parsed.searchQuery);
+            if (parsed.activeTab) setActiveTab(parsed.activeTab);
+          }
+        } catch (e) {
+          console.error('Failed to restore POS session', e);
+        }
+      }
+      localStorage.removeItem('draft_restore_approved');
+      localStorage.removeItem('draft_restore_prompted');
+    }
+  }, []);
+
+  // Autofocus barcode scanner input on mount
+  useEffect(() => {
+    barcodeInputRef.current?.focus();
+  }, []);
+
+  // Autofocus barcode scanner input when printable modal is closed
+  useEffect(() => {
+    if (!selectedInvoiceForPrint) {
+      barcodeInputRef.current?.focus();
+    }
+  }, [selectedInvoiceForPrint]);
+
+  // Keyboard Shortcuts: F2 -> Complete Bill, F3 -> Add Customer, Esc -> Clear Cart
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (activeTab !== 'pos') return;
+
+      if (e.key === 'F2') {
+        e.preventDefault();
+        handleCheckout();
+      } else if (e.key === 'F3') {
+        e.preventDefault();
+        setShowAddCustomerModal(true);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        if (showAddCustomerModal) {
+          setShowAddCustomerModal(false);
+        } else if (selectedInvoiceForPrint) {
+          setSelectedInvoiceForPrint(null);
+        } else {
+          setCart([]);
+          setDiscount('0');
+          setSelectedCustomerId('');
+          showToast('Cart cleared', 'info');
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activeTab, cart, selectedCustomerId, discount, paymentMethod, paidAmount, showAddCustomerModal, selectedInvoiceForPrint]);
+
+  const handleQuickAddCustomer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCustomerName.trim()) return;
+
+    setSavingCustomer(true);
+    try {
+      const res = await addCustomerAction({
+        name: newCustomerName.trim(),
+        mobile: newCustomerMobile.trim() || undefined,
+      });
+
+      if (res.success && 'customer' in res) {
+        showToast('Customer added successfully', 'success');
+        customers.push(res.customer);
+        setSelectedCustomerId(res.customer.id);
+        setShowAddCustomerModal(false);
+        setNewCustomerName('');
+        setNewCustomerMobile('');
+      } else {
+        const errorMsg = 'error' in res ? res.error : 'Failed to add customer';
+        showToast(errorMsg, 'error');
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Failed to add customer', 'error');
+    } finally {
+      setSavingCustomer(false);
+    }
+  };
 
   // Handle barcode scanning (simulate barcode scanner entering enter)
   const handleBarcodeSubmit = (e: React.FormEvent) => {
@@ -86,7 +229,7 @@ export default function SalesClient({ products, customers, salesData }: SalesCli
       addToCart(matchedProduct);
       setBarcodeQuery('');
     } else {
-      alert(`Product with barcode/SKU "${barcodeQuery}" not found.`);
+      showToast(`Product with barcode/SKU "${barcodeQuery}" not found.`, 'warning');
     }
   };
 
@@ -95,7 +238,7 @@ export default function SalesClient({ products, customers, salesData }: SalesCli
     if (existing) {
       // Check stock limit
       if (existing.quantity + 1 > Number(product.currentQuantity)) {
-        alert(`Insufficient stock for ${product.nameEn}. Available: ${product.currentQuantity}`);
+        showToast(`Insufficient stock for ${product.nameEn}. Available: ${product.currentQuantity}`, 'warning');
         return;
       }
       setCart(
@@ -105,7 +248,7 @@ export default function SalesClient({ products, customers, salesData }: SalesCli
       );
     } else {
       if (Number(product.currentQuantity) < 1) {
-        alert(`Insufficient stock for ${product.nameEn}. Available: 0`);
+        showToast(`Insufficient stock for ${product.nameEn}. Available: 0`, 'warning');
         return;
       }
       setCart([...cart, { product, quantity: 1, sellingPrice: Number(product.sellingPrice) }]);
@@ -119,7 +262,7 @@ export default function SalesClient({ products, customers, salesData }: SalesCli
           if (item.product.id === productId) {
             const newQty = item.quantity + delta;
             if (newQty > Number(item.product.currentQuantity)) {
-              alert(`Insufficient stock. Available: ${item.product.currentQuantity}`);
+              showToast(`Insufficient stock. Available: ${item.product.currentQuantity}`, 'warning');
               return item;
             }
             return { ...item, quantity: newQty };
@@ -134,9 +277,9 @@ export default function SalesClient({ products, customers, salesData }: SalesCli
     setCart(cart.filter((item) => item.product.id !== productId));
   };
 
-  const handleCheckout = async () => {
+  const handleCheckout = async (autoPrint = false) => {
     if (cart.length === 0) {
-      alert('Your cart is empty.');
+      showToast('Your cart is empty.', 'warning');
       return;
     }
 
@@ -144,7 +287,7 @@ export default function SalesClient({ products, customers, salesData }: SalesCli
     const paidNum = parseFloat(paidAmount || '0');
 
     if (paymentMethod === PaymentMethod.CREDIT && !selectedCustomerId) {
-      alert(t('selectCustomer') + ' (Required for credit sale)');
+      showToast(t('selectCustomer') + ' (Required for credit sale)', 'warning');
       return;
     }
 
@@ -162,38 +305,58 @@ export default function SalesClient({ products, customers, salesData }: SalesCli
         paidAmount: paidNum,
       });
 
-      if (res.success) {
-        alert('Bill generated successfully!');
+      if (res.success && 'sale' in res) {
+        showToast('Bill generated successfully!', 'success');
         setSelectedInvoiceForPrint(res.sale);
         setCart([]);
         setDiscount('0');
         setSelectedCustomerId('');
+        localStorage.removeItem('draft_sales_pos');
         
         // Refresh invoices list
         const freshInvoices = await listSalesAction(1, 10);
         setInvoices(freshInvoices.items);
         router.refresh();
+
+        if (autoPrint) {
+          setTimeout(() => {
+            window.print();
+          }, 500);
+        } else {
+          // Return focus to barcode
+          setTimeout(() => {
+            barcodeInputRef.current?.focus();
+          }, 200);
+        }
       }
     } catch (err: any) {
-      alert(err.message || 'Error processing transaction');
+      showToast(err.message || 'Error processing transaction', 'error');
     } finally {
       setSubmitting(false);
     }
   };
 
-  const handleReverseSale = async (id: string, invoiceNumber: string) => {
-    if (confirm(`Are you sure you want to reverse bill ${invoiceNumber}? This returns stock and cancels dues.`)) {
-      try {
-        const res = await reverseSaleAction(id);
-        if (res.success) {
-          alert('Sale reversed successfully.');
-          const freshInvoices = await listSalesAction(1, 10);
-          setInvoices(freshInvoices.items);
-          router.refresh();
-        }
-      } catch (err: any) {
-        alert(err.message || 'Error reversing sale');
+  const handleReverseSale = (id: string, invoiceNumber: string) => {
+    setReversalTarget({ id, invoiceNumber });
+  };
+
+  const handleConfirmReverse = async () => {
+    if (!reversalTarget) return;
+    try {
+      const res = await reverseSaleAction(reversalTarget.id);
+      if (res.success) {
+        showToast('Sale reversed successfully.', 'success');
+        const freshInvoices = await listSalesAction(1, 10);
+        setInvoices(freshInvoices.items);
+        router.refresh();
+      } else {
+        const errorMsg = 'error' in res ? res.error : 'Error reversing sale';
+        showToast(errorMsg, 'error');
       }
+    } catch (err: any) {
+      showToast(err.message || 'Error reversing sale', 'error');
+    } finally {
+      setReversalTarget(null);
     }
   };
 
@@ -262,7 +425,7 @@ export default function SalesClient({ products, customers, salesData }: SalesCli
                 <option value="">ਵਾਕ-ਇਨ ਗਾਹਕ (Walk-in Customer)</option>
                 {customers.map((c) => (
                   <option key={c.id} value={c.id}>
-                    {c.name} ({c.mobile || 'No mobile'}) - Bal: ₹{Number(c.currentBalance).toFixed(2)}
+                    {c.name} ({c.mobile || 'No mobile'}) - Bal: {formatPrice(Number(c.currentBalance))}
                   </option>
                 ))}
               </select>
@@ -286,7 +449,7 @@ export default function SalesClient({ products, customers, salesData }: SalesCli
                         {language === 'pa' ? item.product.namePa : item.product.nameEn}
                       </p>
                       <p className="text-xs text-slate-550 dark:text-slate-400 mt-0.5">
-                        ₹{item.sellingPrice.toFixed(2)} / {item.product.unit}
+                        {formatPrice(item.sellingPrice)} / {item.product.unit}
                       </p>
                     </div>
                     
@@ -311,7 +474,7 @@ export default function SalesClient({ products, customers, salesData }: SalesCli
                       </div>
 
                       <div className="w-20 text-right font-extrabold text-sm">
-                        ₹{(item.quantity * item.sellingPrice).toFixed(2)}
+                        {formatPrice(item.quantity * item.sellingPrice)}
                       </div>
 
                       <button
@@ -332,7 +495,7 @@ export default function SalesClient({ products, customers, salesData }: SalesCli
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm font-semibold">
                 <div>
                   <span className="text-slate-450 block">{t('subTotal')}:</span>
-                  <span className="text-md font-bold">₹{subTotal.toFixed(2)}</span>
+                  <span className="text-md font-bold">{formatPrice(subTotal)}</span>
                 </div>
                 <div>
                   <span className="text-slate-450 block">{t('discount')}:</span>
@@ -367,18 +530,62 @@ export default function SalesClient({ products, customers, salesData }: SalesCli
                 </div>
               </div>
 
+              {paymentMethod === PaymentMethod.CASH && parseFloat(paidAmount || '0') > total && (
+                <div className="flex justify-between items-center text-sm font-bold text-emerald-600 dark:text-emerald-450 bg-emerald-50 dark:bg-emerald-950/20 p-2.5 rounded-lg border border-emerald-100 dark:border-emerald-900">
+                  <span>ਵਾਪਸੀ ਬਾਕੀ (Change Return):</span>
+                  <span>{formatPrice(parseFloat(paidAmount || '0') - total)}</span>
+                </div>
+              )}
+
               <div className="flex justify-between items-center border-t border-slate-200 dark:border-slate-800 pt-3 text-lg font-extrabold">
                 <span className="text-slate-500">{t('total')}:</span>
-                <span className="text-2xl text-blue-650 dark:text-blue-400">₹{total.toFixed(2)}</span>
+                <span className="text-2xl text-blue-650 dark:text-blue-400">{formatPrice(total)}</span>
               </div>
 
-              <button
-                onClick={handleCheckout}
-                disabled={submitting || cart.length === 0}
-                className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-lg font-bold shadow-md transition-all disabled:opacity-50"
-              >
-                {submitting ? 'ਬਿੱਲ ਬਣ ਰਿਹਾ ਹੈ...' : t('generateInvoice')}
-              </button>
+              <div className="relative flex w-full">
+                <button
+                  type="button"
+                  onClick={() => handleCheckout(true)}
+                  disabled={submitting || cart.length === 0}
+                  className="flex-1 py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-l-xl text-lg font-bold shadow-md transition-all disabled:opacity-50 flex items-center justify-center gap-1.5"
+                >
+                  <Printer className="w-5 h-5" />
+                  {submitting ? 'ਬਿੱਲ ਬਣ ਰਿਹਾ ਹੈ...' : 'ਰਸੀਦ ਪ੍ਰਿੰਟ ਕਰੋ (Print Receipt)'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowPrintDropdown(!showPrintDropdown)}
+                  disabled={submitting || cart.length === 0}
+                  className="px-4 bg-blue-700 hover:bg-blue-800 text-white rounded-r-xl border-l border-blue-500 shadow-md transition-all flex items-center justify-center disabled:opacity-50"
+                >
+                  <ChevronDown className="w-5 h-5" />
+                </button>
+                
+                {showPrintDropdown && (
+                  <div className="absolute right-0 bottom-full mb-2 w-48 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-xl overflow-hidden z-30">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowPrintDropdown(false);
+                        handleCheckout(true);
+                      }}
+                      className="w-full px-4 py-3 text-left text-sm font-bold hover:bg-slate-50 dark:hover:bg-slate-850 text-slate-700 dark:text-slate-300"
+                    >
+                      ਡਾਇਰੈਕਟ ਪ੍ਰਿੰਟ (Direct Print)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowPrintDropdown(false);
+                        handleCheckout(false);
+                      }}
+                      className="w-full px-4 py-3 text-left text-sm font-bold border-t border-slate-100 dark:border-slate-850 hover:bg-slate-50 dark:hover:bg-slate-850 text-slate-700 dark:text-slate-300"
+                    >
+                      ਪੂਰਵਦਰਸ਼ਨ (Preview Receipt)
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
@@ -444,7 +651,7 @@ export default function SalesClient({ products, customers, salesData }: SalesCli
                       </div>
                       <div className="text-right shrink-0">
                         <span className="font-extrabold text-sm text-blue-650 dark:text-blue-400 block">
-                          ₹{Number(p.sellingPrice).toFixed(2)}
+                          {formatPrice(Number(p.sellingPrice))}
                         </span>
                         <span className={`text-[10px] font-bold ${isOut ? 'text-red-500' : 'text-slate-450'}`}>
                           {isOut ? 'OUT OF STOCK' : `Stock: ${qty} ${p.unit}`}
@@ -514,9 +721,20 @@ export default function SalesClient({ products, customers, salesData }: SalesCli
                       <td className="py-3.5 px-6 text-center">
                         <div className="flex items-center justify-center gap-2">
                           <button
-                            onClick={() => setSelectedInvoiceForPrint(sale)}
+                            onClick={async () => {
+                              try {
+                                const fullSale = await getSaleAction(sale.id);
+                                if (fullSale) {
+                                  setSelectedInvoiceForPrint(fullSale);
+                                } else {
+                                  showToast('Unable to load invoice details', 'error');
+                                }
+                              } catch (err: any) {
+                                showToast(err.message || 'Error loading invoice', 'error');
+                              }
+                            }}
                             className="p-2 border border-slate-205 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-350"
-                            title="Print Invoice"
+                            title="Print Receipt"
                           >
                             <Printer className="w-4 h-4" />
                           </button>
@@ -542,128 +760,396 @@ export default function SalesClient({ products, customers, salesData }: SalesCli
       )}
 
       {/* PRINTABLE RETAIL TAX INVOICE MODAL */}
-      {selectedInvoiceForPrint && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-2xl shadow-xl overflow-hidden p-6 max-h-[90vh] flex flex-col">
-            
-            {/* Modal actions, hidden on print */}
-            <div className="flex justify-between items-center mb-6 shrink-0 no-print">
-              <h2 className="text-xl font-bold">ਰਿਟੇਲ ਟੈਕਸ ਬਿੱਲ (Print Tax Invoice)</h2>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => window.print()}
-                  className="px-4 py-2 bg-blue-650 hover:bg-blue-700 text-white rounded-lg text-xs font-bold shadow flex items-center gap-1.5"
-                >
-                  <Printer className="w-4 h-4" />
-                  Print Page
-                </button>
+      {selectedInvoiceForPrint && (() => {
+        const format = shop?.settings?.receiptFormat || 'SIMPLE';
+        const printer = shop?.settings?.printerType || 'THERMAL_80';
+        const gstRegistered = shop?.gstRegistered || false;
+        
+        // Detailed layout is only GST-active if layout is DETAILED and shop is GST-registered
+        const showGST = gstRegistered && format === 'DETAILED';
+        const headerTitle = showGST ? 'TAX INVOICE' : 'RETAIL RECEIPT';
+
+        return (
+          <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-2xl shadow-xl overflow-hidden p-6 max-h-[90vh] flex flex-col">
+              
+              {/* Modal actions, hidden on print */}
+              <div className="flex justify-between items-center mb-6 shrink-0 no-print">
+                <h2 className="text-xl font-bold">ਰਸੀਦ ਦੇਖੋ (Receipt Preview)</h2>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => window.print()}
+                    className="px-4 py-2 bg-blue-605 hover:bg-blue-700 text-white rounded-lg text-xs font-bold shadow flex items-center gap-1.5 bg-blue-600"
+                  >
+                    <Printer className="w-4 h-4" />
+                    ਰਸੀਦ ਪ੍ਰਿੰਟ ਕਰੋ (Print Receipt)
+                  </button>
+                  <button
+                    onClick={() => setSelectedInvoiceForPrint(null)}
+                    className="p-2 hover:bg-slate-100 dark:hover:bg-slate-850 rounded-lg border border-slate-200 dark:border-slate-700"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Printable Invoice Formatter */}
+              <div className={`flex-1 overflow-y-auto pr-1 print-area font-sans text-black dark:text-white p-4 border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-slate-900/50 print-${printer}`}>
+                {printer === 'A4' ? (
+                  /* ==================== A4 LAYOUT ==================== */
+                  <div className="space-y-6 text-sm text-slate-800 p-2">
+                    {/* Top Header Grid */}
+                    <div className="flex justify-between items-start border-b pb-4">
+                      <div className="flex gap-4 items-center">
+                        {shop?.logo && (
+                          <div className="w-16 h-16 overflow-hidden flex items-center justify-center border rounded">
+                            <img src={shop.logo} alt="Logo" className="w-full h-full object-contain" />
+                          </div>
+                        )}
+                        <div>
+                          <h2 className="text-2xl font-bold uppercase text-slate-900">{shop?.name}</h2>
+                          {shop?.address && <p className="text-xs">{shop.address}</p>}
+                          {shop?.phone && <p className="text-xs">Phone: {shop.phone}</p>}
+                          {shop?.email && <p className="text-xs">Email: {shop.email}</p>}
+                          {showGST && shop?.gst && <p className="text-xs font-semibold">GSTIN: {shop.gst}</p>}
+                        </div>
+                      </div>
+                      <div className="text-right space-y-1">
+                        <h3 className="text-xl font-black text-blue-700">{headerTitle}</h3>
+                        <p className="text-xs"><strong>{showGST ? 'Invoice No' : 'Receipt No'}:</strong> {selectedInvoiceForPrint.invoiceNumber}</p>
+                        <p className="text-xs"><strong>Date:</strong> {new Date(selectedInvoiceForPrint.date).toLocaleString()}</p>
+                      </div>
+                    </div>
+
+                    {/* Customer / Billed To Section */}
+                    <div className="grid grid-cols-2 gap-4 bg-slate-50 p-3 rounded-lg border">
+                      <div>
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">Billed To (ਖਰੀਦਦਾਰ)</h4>
+                        <p className="font-bold text-slate-900">{selectedInvoiceForPrint.customer?.name || 'Walk-in Customer'}</p>
+                        {selectedInvoiceForPrint.customer?.mobile && <p className="text-xs">Mobile: {selectedInvoiceForPrint.customer.mobile}</p>}
+                        {selectedInvoiceForPrint.customer?.address && <p className="text-xs">Address: {selectedInvoiceForPrint.customer.address}</p>}
+                      </div>
+                      <div className="text-right">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">Payment Details</h4>
+                        <p className="text-xs"><strong>Method:</strong> {selectedInvoiceForPrint.paymentMethod}</p>
+                        <p className="text-xs"><strong>Status:</strong> {selectedInvoiceForPrint.dueAmount > 0 ? 'PARTIAL/DUE' : 'PAID'}</p>
+                      </div>
+                    </div>
+
+                    {/* Product Table */}
+                    <table className="w-full text-sm text-left border-collapse border">
+                      <thead>
+                        <tr className="bg-slate-100 text-slate-700 font-bold border-b font-mono">
+                          <th className="py-2.5 px-3 border text-center">#</th>
+                          <th className="py-2.5 px-3 border">Item</th>
+                          {showGST && <th className="py-2.5 px-3 border text-center">HSN</th>}
+                          <th className="py-2.5 px-3 border text-center">Qty</th>
+                          <th className="py-2.5 px-3 border text-right">Rate</th>
+                          {showGST && <th className="py-2.5 px-3 border text-center">GST</th>}
+                          <th className="py-2.5 px-3 border text-right">Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {selectedInvoiceForPrint.items?.map((item: any, idx: number) => {
+                          const baseAmount = Number(item.quantity) * Number(item.sellingPrice);
+                          return (
+                            <tr key={item.id} className="hover:bg-slate-50">
+                              <td className="py-2 px-3 border text-center">{idx + 1}</td>
+                              <td className="py-2 px-3 border">
+                                <div className="font-semibold text-slate-900">{item.product?.namePa}</div>
+                                <div className="text-[10px] text-slate-500">{item.product?.nameEn}</div>
+                              </td>
+                              {showGST && <td className="py-2 px-3 border text-center">{item.product?.hsn || '-'}</td>}
+                              <td className="py-2 px-3 border text-center">
+                                {Number(item.quantity)} {item.product?.unit}
+                              </td>
+                              <td className="py-2 px-3 border text-right">{formatPrice(Number(item.sellingPrice))}</td>
+                              {showGST && <td className="py-2 px-3 border text-center">{item.product?.gstRate ? `${item.product.gstRate}%` : '0%'}</td>}
+                              <td className="py-2 px-3 border text-right font-semibold">{formatPrice(baseAmount)}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+
+                    {/* Totals Summary */}
+                    <div className="grid grid-cols-2 gap-4 pt-4">
+                      <div>
+                        {shop?.returnPolicy && (
+                          <div className="p-3 bg-slate-50 border rounded-lg text-xs text-slate-500 whitespace-pre-line">
+                            <strong className="text-slate-700 block mb-1">Return Policy & Terms:</strong>
+                            {shop.returnPolicy}
+                          </div>
+                        )}
+                      </div>
+                      <div className="space-y-1.5 text-right max-w-sm ml-auto w-full">
+                        <div className="flex justify-between text-xs text-slate-600">
+                          <span>Subtotal:</span>
+                          <span>{formatPrice(Number(selectedInvoiceForPrint.subTotal))}</span>
+                        </div>
+                        {Number(selectedInvoiceForPrint.discount) > 0 && (
+                          <div className="flex justify-between text-xs text-rose-600">
+                            <span>Discount:</span>
+                            <span>- {formatPrice(Number(selectedInvoiceForPrint.discount))}</span>
+                          </div>
+                        )}
+                        
+                        {/* GST breakdown summary if enabled */}
+                        {showGST && (
+                          <div className="border-t border-dashed py-1.5 my-1.5 space-y-1 text-xs text-slate-500">
+                            <div className="flex justify-between">
+                              <span>CGST (9%):</span>
+                              <span>{formatPrice((Number(selectedInvoiceForPrint.total) - Number(selectedInvoiceForPrint.subTotal) * 0.84) / 2)}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span>SGST (9%):</span>
+                              <span>{formatPrice((Number(selectedInvoiceForPrint.total) - Number(selectedInvoiceForPrint.subTotal) * 0.84) / 2)}</span>
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="flex justify-between text-base font-bold border-t pt-2 text-slate-900">
+                          <span>Grand Total:</span>
+                          <span>{formatPrice(Number(selectedInvoiceForPrint.total))}</span>
+                        </div>
+                        
+                        <div className="border-t pt-2 space-y-1 text-xs text-slate-600">
+                          <div className="flex justify-between">
+                            <span>Paid:</span>
+                            <span>{formatPrice(Number(selectedInvoiceForPrint.paidAmount))}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Change Returned:</span>
+                            <span>{formatPrice(Math.max(0, Number(selectedInvoiceForPrint.paidAmount) - Number(selectedInvoiceForPrint.total)))}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Signatures & Footer */}
+                    <div className="flex justify-between items-end pt-12 border-t mt-8">
+                      <p className="text-xs text-slate-400">{shop?.footerMessage || 'Thank You! Visit Again'}</p>
+                      <div className="text-center w-48 border-t pt-2">
+                        <p className="text-xs font-bold text-slate-800">Authorized Signature</p>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  /* ==================== THERMAL (58mm / 80mm) LAYOUT ==================== */
+                  <div className="space-y-4">
+                    <div className="text-center border-b border-dashed border-slate-350 pb-4 mb-4">
+                      {shop?.logo && (
+                        <div className="w-12 h-12 mx-auto mb-2 flex items-center justify-center overflow-hidden">
+                          <img src={shop.logo} alt="Logo" className="w-full h-full object-contain" />
+                        </div>
+                      )}
+                      <h2 className="text-lg font-black uppercase tracking-tight">{shop?.name}</h2>
+                      {shop?.address && <p className="text-[11px] mt-0.5">{shop.address}</p>}
+                      {shop?.phone && <p className="text-[11px]">Mob: {shop.phone}</p>}
+                      {showGST && shop?.gst && <p className="text-[11px] font-bold">GSTIN: {shop.gst}</p>}
+                      <h3 className="text-[11px] font-bold border border-black dark:border-white inline-block px-2.5 py-0.5 mt-2.5 uppercase tracking-wider">
+                        {headerTitle}
+                      </h3>
+                    </div>
+
+                    {/* Metadata */}
+                    <div className="grid grid-cols-2 text-[11px] gap-y-0.5 mb-2 font-mono">
+                      <div><strong>{showGST ? 'Invoice No' : 'Receipt No'}:</strong> {selectedInvoiceForPrint.invoiceNumber}</div>
+                      <div className="text-right"><strong>Date:</strong> {new Date(selectedInvoiceForPrint.date).toLocaleString()}</div>
+                      <div><strong>Customer:</strong> {selectedInvoiceForPrint.customer?.name || 'Walk-in'}</div>
+                      <div className="text-right"><strong>Cashier:</strong> {selectedInvoiceForPrint.user?.name || 'Staff'}</div>
+                    </div>
+
+                    {/* Product Table */}
+                    <table className="w-full text-[11px] text-left border-t border-b border-dashed border-black dark:border-white py-1.5 mb-2 border-collapse font-mono">
+                      <thead>
+                        <tr className="border-b border-dashed border-black font-bold">
+                          <th className="py-1">Item</th>
+                          {showGST && <th className="py-1 text-center">HSN</th>}
+                          <th className="py-1 text-center">Qty</th>
+                          <th className="py-1 text-right">Rate</th>
+                          {showGST && <th className="py-1 text-center">GST</th>}
+                          <th className="py-1 text-right">Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {selectedInvoiceForPrint.items?.map((item: any) => {
+                          const itemAmount = Number(item.quantity) * Number(item.sellingPrice);
+                          return (
+                            <tr key={item.id}>
+                              <td className="py-1.5 pr-1">
+                                <div className="font-bold">{item.product?.namePa}</div>
+                                <div className="text-[9px] text-slate-500">{item.product?.nameEn}</div>
+                              </td>
+                              {showGST && <td className="py-1.5 text-center">{item.product?.hsn || '-'}</td>}
+                              <td className="py-1.5 text-center">
+                                {Number(item.quantity)} {item.product?.unit}
+                              </td>
+                              <td className="py-1.5 text-right">{formatPrice(Number(item.sellingPrice))}</td>
+                              {showGST && <td className="py-1.5 text-center">{item.product?.gstRate ? `${item.product.gstRate}%` : '0%'}</td>}
+                              <td className="py-1.5 text-right font-bold">{formatPrice(itemAmount)}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+
+                    {/* Summary */}
+                    <div className="w-full text-[11px] space-y-1 pb-2 border-b border-dashed border-black dark:border-white font-mono">
+                      <div className="flex justify-between">
+                        <span>Total Items:</span>
+                        <span>{selectedInvoiceForPrint.items?.length || 0}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Total Quantity:</span>
+                        <span>{selectedInvoiceForPrint.items?.reduce((sum: number, i: any) => sum + Number(i.quantity), 0) || 0}</span>
+                      </div>
+                      {Number(selectedInvoiceForPrint.discount) > 0 && (
+                        <div className="flex justify-between text-rose-600">
+                          <span>Discount:</span>
+                          <span>- {formatPrice(Number(selectedInvoiceForPrint.discount))}</span>
+                        </div>
+                      )}
+                      
+                      {/* GST breakdown table */}
+                      {showGST && (
+                        <div className="border-t border-dashed py-1 text-slate-500 text-[10px]">
+                          <div className="flex justify-between">
+                            <span>CGST:</span>
+                            <span>{formatPrice((Number(selectedInvoiceForPrint.total) - Number(selectedInvoiceForPrint.subTotal) * 0.84) / 2)}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>SGST:</span>
+                            <span>{formatPrice((Number(selectedInvoiceForPrint.total) - Number(selectedInvoiceForPrint.subTotal) * 0.84) / 2)}</span>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="flex justify-between text-xs font-black border-t border-dashed pt-1">
+                        <span>Grand Total:</span>
+                        <span>{formatPrice(Number(selectedInvoiceForPrint.total))}</span>
+                      </div>
+                    </div>
+
+                    {/* Payment Details */}
+                    <div className="grid grid-cols-2 text-[10px] gap-y-0.5 font-mono pt-1">
+                      <div><strong>Payment Method:</strong> {selectedInvoiceForPrint.paymentMethod}</div>
+                      <div className="text-right"><strong>Paid Amount:</strong> {formatPrice(Number(selectedInvoiceForPrint.paidAmount))}</div>
+                      <div><strong>Change Returned:</strong> {formatPrice(Math.max(0, Number(selectedInvoiceForPrint.paidAmount) - Number(selectedInvoiceForPrint.total)))}</div>
+                    </div>
+
+                    {shop?.footerMessage && (
+                      <p className="text-center text-[10px] pt-2 border-t border-dashed mt-4 whitespace-pre-line italic">
+                        {shop.footerMessage}
+                      </p>
+                    )}
+                    
+                    {shop?.returnPolicy && (
+                      <div className="text-center text-[9px] mt-1 border-t border-dashed pt-1 whitespace-pre-line text-slate-500">
+                        <strong>Return Policy:</strong><br />
+                        {shop.returnPolicy}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end pt-4 border-t border-slate-200 dark:border-slate-800 shrink-0 mt-4 no-print">
                 <button
                   onClick={() => setSelectedInvoiceForPrint(null)}
-                  className="p-2 hover:bg-slate-100 dark:hover:bg-slate-850 rounded-lg border border-slate-200 dark:border-slate-700"
+                  className="px-6 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-lg text-sm font-bold"
                 >
-                  <X className="w-4 h-4" />
+                  Close
                 </button>
               </div>
             </div>
-
-            {/* Printable Invoice Formatter */}
-            <div className="flex-1 overflow-y-auto pr-1 print-area font-sans text-black dark:text-white p-4 border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-slate-900/50">
-              <div className="text-center border-b border-dashed border-slate-350 pb-4 mb-4">
-                <h2 className="text-xl font-extrabold uppercase">Sher-E-Punjab Retail</h2>
-                <p className="text-xs mt-1">G.T. Road, Jalandhar, Punjab</p>
-                <p className="text-xs">GSTIN: 03AAAAA1111A1Z1</p>
-                <p className="text-xs">Mobile: 9876543210</p>
-                <h3 className="text-sm font-bold border border-black dark:border-white inline-block px-3 py-0.5 mt-3 uppercase tracking-wider">
-                  RETAIL INVOICE
-                </h3>
-              </div>
-
-              <div className="grid grid-cols-2 text-xs gap-y-1 mb-4">
-                <div><strong>Invoice No:</strong> {selectedInvoiceForPrint.invoiceNumber}</div>
-                <div className="text-right">
-                  <strong>Date:</strong> {new Date(selectedInvoiceForPrint.date).toLocaleString()}
-                </div>
-                <div><strong>Customer:</strong> {selectedInvoiceForPrint.customer?.name || 'Walk-in'}</div>
-                <div className="text-right">
-                  <strong>Mobile:</strong> {selectedInvoiceForPrint.customer?.mobile || '-'}
-                </div>
-              </div>
-
-              <table className="w-full text-xs text-left border-t border-b border-black dark:border-white py-2 mb-4 border-collapse">
-                <thead>
-                  <tr className="border-b border-black dark:border-white font-bold">
-                    <th className="py-2">Item Name (Punjabi / English)</th>
-                    <th className="py-2 text-center">Qty</th>
-                    <th className="py-2 text-right">Price</th>
-                    <th className="py-2 text-right">Total</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200 dark:divide-slate-850">
-                  {selectedInvoiceForPrint.items?.map((item: any) => (
-                    <tr key={item.id}>
-                      <td className="py-2">
-                        <div className="font-bold">{item.product?.namePa}</div>
-                        <div className="text-[10px] text-slate-500">{item.product?.nameEn}</div>
-                      </td>
-                      <td className="py-2 text-center">
-                        {Number(item.quantity)} {item.product?.unit}
-                      </td>
-                      <td className="py-2 text-right">₹{Number(item.sellingPrice).toFixed(2)}</td>
-                      <td className="py-2 text-right font-bold">₹{Number(item.total).toFixed(2)}</td>
-                    </tr>
-                  )) || (
-                    // Fallback for list display when items are not pre-fetched in group
-                    cart.map((item, idx) => (
-                      <tr key={idx}>
-                        <td className="py-2">
-                          <div className="font-bold">{item.product.namePa}</div>
-                          <div className="text-[10px] text-slate-500">{item.product.nameEn}</div>
-                        </td>
-                        <td className="py-2 text-center">{item.quantity} {item.product.unit}</td>
-                        <td className="py-2 text-right">₹{item.sellingPrice.toFixed(2)}</td>
-                        <td className="py-2 text-right font-bold">₹{(item.quantity * item.sellingPrice).toFixed(2)}</td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-
-              <div className="w-48 ml-auto text-xs space-y-1.5 border-b border-black dark:border-white pb-3 mb-3">
-                <div className="flex justify-between">
-                  <span>Subtotal:</span>
-                  <span>₹{Number(selectedInvoiceForPrint.subTotal).toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between text-rose-600">
-                  <span>Discount:</span>
-                  <span>- ₹{Number(selectedInvoiceForPrint.discount).toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between text-md font-bold border-t border-slate-300 pt-1.5">
-                  <span>Grand Total:</span>
-                  <span>₹{Number(selectedInvoiceForPrint.total).toFixed(2)}</span>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 text-[10px] font-semibold gap-y-1">
-                <div><strong>Payment Method:</strong> {selectedInvoiceForPrint.paymentMethod}</div>
-                <div className="text-right"><strong>Paid Amount:</strong> ₹{Number(selectedInvoiceForPrint.paidAmount).toFixed(2)}</div>
-                <div><strong>Due Amount:</strong> ₹{Number(selectedInvoiceForPrint.dueAmount).toFixed(2)}</div>
-              </div>
-
-              <div className="text-center text-[10px] mt-8 border-t border-slate-200 dark:border-slate-800 pt-4 italic">
-                Thank you for your business! <br />
-                ਦੁਬਾਰਾ ਮਿਲਣ ਦੀ ਉਮੀਦ ਹੈ (Hope to see you again)
-              </div>
-            </div>
-
-            <div className="flex justify-end pt-4 border-t border-slate-200 dark:border-slate-800 shrink-0 mt-4 no-print">
-              <button
-                onClick={() => setSelectedInvoiceForPrint(null)}
-                className="px-6 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-lg text-sm font-bold"
-              >
-                Close
-              </button>
-            </div>
           </div>
+        );
+      })()}
+
+      {/* Confirm Sale Reversal Dialog */}
+      <ConfirmDialog
+        isOpen={reversalTarget !== null}
+        title="ਬਿੱਲ ਰਿਵਰਸ ਕਰੋ? (Reverse Invoice?)"
+        message={`ਕੀ ਤੁਸੀਂ ਸੱਚਮੁੱਚ ਬਿੱਲ ${reversalTarget?.invoiceNumber} ਨੂੰ ਰਿਵਰਸ ਕਰਨਾ ਚਾਹੁੰਦੇ ਹੋ? ਇਹ ਸਟਾਕ ਵਾਪਸ ਕਰੇਗਾ ਅਤੇ ਬਕਾਇਆ ਰੱਦ ਕਰ ਦੇਵੇਗਾ।`}
+        confirmLabel="ਰਿਵਰਸ ਕਰੋ (Reverse)"
+        cancelLabel="ਬੰਦ ਕਰੋ (Cancel)"
+        onConfirm={handleConfirmReverse}
+        onClose={() => setReversalTarget(null)}
+        isDestructive={true}
+      />
+
+      {/* Quick Add Customer Modal */}
+      {showAddCustomerModal && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 no-print">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-md shadow-xl overflow-hidden p-6 relative">
+            <button
+              onClick={() => setShowAddCustomerModal(false)}
+              className="absolute top-4 right-4 p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-650 dark:text-slate-500 dark:hover:text-slate-300 transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+            <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 border-b pb-2 mb-4">
+              ਨਵਾਂ ਗਾਹਕ ਜੋੜੋ (Quick Add Customer)
+            </h3>
+            <form onSubmit={handleQuickAddCustomer} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">
+                  ਗਾਹਕ ਦਾ ਨਾਮ (Customer Name)
+                </label>
+                <input
+                  type="text"
+                  value={newCustomerName}
+                  onChange={(e) => setNewCustomerName(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-sm font-semibold"
+                  placeholder="e.g. Gurpreet Singh"
+                  required
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">
+                  ਮੋਬਾਈਲ ਨੰਬਰ (Mobile Number - Optional)
+                </label>
+                <input
+                  type="text"
+                  value={newCustomerMobile}
+                  onChange={(e) => setNewCustomerMobile(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-sm font-semibold"
+                  placeholder="e.g. 9876543210"
+                />
+              </div>
+              <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowAddCustomerModal(false)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-850 dark:hover:bg-slate-800 rounded-lg text-sm font-bold text-slate-700 dark:text-slate-300"
+                >
+                  ਰੱਦ ਕਰੋ (Cancel)
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingCustomer}
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg text-sm font-bold active:scale-95"
+                >
+                  {savingCustomer ? 'ਸੇਵ ਹੋ ਰਿਹਾ...' : 'ਸੇਵ ਕਰੋ (Save)'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Empty State for Invoice History */}
+      {activeTab === 'invoices' && invoices.length === 0 && (
+        <div className="mt-6">
+          <EmptyState
+            icon={History}
+            title="ਕੋਈ ਬਿੱਲ ਨਹੀਂ ਮਿਲਿਆ (No Invoices Found)"
+            description="ਕੋਈ ਬਿੱਲ ਜਨਰੇਟ ਨਹੀਂ ਕੀਤਾ ਗਿਆ ਹੈ। ਵਿਕਰੀ ਕਰਨ ਲਈ POS 'ਤੇ ਜਾਓ।"
+            actionLabel="ਬਿੱਲ ਬਣਾਓ (Go to POS)"
+            onAction={() => setActiveTab('pos')}
+          />
         </div>
       )}
 

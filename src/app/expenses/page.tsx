@@ -13,10 +13,14 @@ export default async function ExpensesPage() {
   }
 
   const expensesData = await listExpensesAction(1, 20);
-  const summary = await getExpenseSummaryAction();
+  
+  // Only Owner and Manager can view summary cards
+  const summary = (user.role === 'OWNER' || user.role === 'MANAGER')
+    ? await getExpenseSummaryAction()
+    : [];
 
   return (
-    <Shell userName={user.name} shopName="Sher-E-Punjab Retail">
+    <Shell userName={user.name} shopName={user.shopName || 'Punjab Shop'}>
       <div className="space-y-6">
         <div>
           <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight">
@@ -30,6 +34,8 @@ export default async function ExpensesPage() {
         <ExpensesClient
           expensesData={expensesData}
           summary={summary}
+          currentUserRole={user.role}
+          currentUserId={user.userId}
         />
       </div>
     </Shell>

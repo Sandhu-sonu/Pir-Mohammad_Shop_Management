@@ -34,8 +34,14 @@ export default async function SalesPage() {
   // Load recent invoices
   const salesData = await listSalesAction(1, 10);
 
+  // Load shop with regional & printer settings
+  const shop = await prisma.shop.findUnique({
+    where: { id: user.shopId },
+    include: { settings: true },
+  });
+
   return (
-    <Shell userName={user.name} shopName="Sher-E-Punjab Retail">
+    <Shell userName={user.name} shopName={user.shopName || 'Punjab Shop'}>
       <div className="space-y-6">
         <div>
           <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight">
@@ -50,6 +56,7 @@ export default async function SalesPage() {
           products={JSON.parse(JSON.stringify(products))}
           customers={JSON.parse(JSON.stringify(customers.items))}
           salesData={salesData}
+          shop={JSON.parse(JSON.stringify(shop))}
         />
       </div>
     </Shell>

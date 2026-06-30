@@ -1,5 +1,6 @@
 import { CustomerRepository, CustomerFilterInput } from '../repositories/CustomerRepository';
 import { prisma } from '../prisma';
+import { Prisma } from '@prisma/client';
 
 export class CustomerService {
   static async getCustomer(id: string) {
@@ -20,10 +21,10 @@ export class CustomerService {
   }) {
     return CustomerRepository.create({
       shopId: data.shopId,
-      name: data.name,
-      mobile: data.mobile || null,
-      address: data.address || null,
-      notes: data.notes || null,
+      name: data.name.trim(),
+      mobile: (data.mobile && data.mobile.trim()) ? data.mobile.trim() : null,
+      address: (data.address && data.address.trim()) ? data.address.trim() : null,
+      notes: (data.notes && data.notes.trim()) ? data.notes.trim() : null,
       openingBalance: data.openingBalance || 0,
     });
   }
@@ -37,7 +38,12 @@ export class CustomerService {
       notes: string;
     }>
   ) {
-    return CustomerRepository.update(id, data);
+    const sanitizedData: Prisma.CustomerUpdateInput = {};
+    if (data.name !== undefined) sanitizedData.name = data.name.trim();
+    if (data.mobile !== undefined) sanitizedData.mobile = (data.mobile && data.mobile.trim()) ? data.mobile.trim() : null;
+    if (data.address !== undefined) sanitizedData.address = (data.address && data.address.trim()) ? data.address.trim() : null;
+    if (data.notes !== undefined) sanitizedData.notes = (data.notes && data.notes.trim()) ? data.notes.trim() : null;
+    return CustomerRepository.update(id, sanitizedData);
   }
 
   static async deleteCustomer(id: string) {
@@ -48,11 +54,11 @@ export class CustomerService {
     return CustomerRepository.getLedger(customerId);
   }
 
-  static async receivePayment(shopId: string, customerId: string, amount: number, note?: string) {
+  static async receivePayment(shopId: string, customerId: string, amount: number, note?: string, paymentMethod: any = 'CASH') {
     if (amount <= 0) {
       throw new Error('Payment amount must be greater than zero');
     }
-    return CustomerRepository.receivePayment(shopId, customerId, amount, note);
+    return CustomerRepository.receivePayment(shopId, customerId, amount, note, paymentMethod);
   }
 
   static async getCustomerProfile(customerId: string) {

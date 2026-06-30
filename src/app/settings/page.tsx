@@ -35,6 +35,7 @@ export default async function SettingsPage() {
 
         <SettingsClient
           shop={JSON.parse(JSON.stringify(shop))}
+          role={user.role}
         />
       </div>
     </Shell>

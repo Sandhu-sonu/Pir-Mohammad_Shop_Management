@@ -16,7 +16,7 @@ export default async function DashboardPage() {
   const stats = JSON.parse(JSON.stringify(await getDashboardStatsAction()));
 
   return (
-    <Shell userName={user.name} shopName="Sher-E-Punjab Retail">
+    <Shell userName={user.name} shopName={user.shopName || 'Punjab Shop'}>
       <div className="space-y-6">
         
         {/* Dashboard Title & Closing Header */}

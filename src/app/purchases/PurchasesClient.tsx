@@ -94,6 +94,55 @@ export default function PurchasesClient({ initialPurchases, suppliers, products 
     setTimeout(() => setMessage(null), 5000);
   };
 
+  // Caching purchase state to local storage for crash/session recovery (Module 5)
+  React.useEffect(() => {
+    if (cartItems.length > 0 || supplierId || invoiceNumber || note) {
+      localStorage.setItem(
+        'draft_purchase_form',
+        JSON.stringify({
+          supplierId,
+          invoiceNumber,
+          note,
+          cartItems,
+          paidAmount,
+          paymentMethod,
+          status,
+          showPOS,
+          savedAt: Date.now(),
+        })
+      );
+    } else {
+      localStorage.removeItem('draft_purchase_form');
+    }
+  }, [supplierId, invoiceNumber, note, cartItems, paidAmount, paymentMethod, status, showPOS]);
+
+  // Restoring purchase state on approval
+  React.useEffect(() => {
+    const approved = localStorage.getItem('draft_restore_approved');
+    if (approved === 'true') {
+      const draft = localStorage.getItem('draft_purchase_form');
+      if (draft) {
+        try {
+          const parsed = JSON.parse(draft);
+          const now = Date.now();
+          // Verify 24-hour expiration threshold
+          if (parsed.savedAt && now - parsed.savedAt <= 24 * 60 * 60 * 1000) {
+            if (parsed.supplierId) setSupplierId(parsed.supplierId);
+            if (parsed.invoiceNumber) setInvoiceNumber(parsed.invoiceNumber);
+            if (parsed.note) setNote(parsed.note);
+            if (parsed.cartItems) setCartItems(parsed.cartItems);
+            if (parsed.paidAmount) setPaidAmount(parsed.paidAmount);
+            if (parsed.paymentMethod) setPaymentMethod(parsed.paymentMethod);
+            if (parsed.status) setStatus(parsed.status);
+            if (parsed.showPOS) setShowPOS(parsed.showPOS);
+          }
+        } catch (e) {
+          console.error('Failed to restore purchase draft', e);
+        }
+      }
+    }
+  }, []);
+
   // Calculations
   const filteredPurchases = purchases.filter((p) =>
     (p.invoiceNumber && p.invoiceNumber.toLowerCase().includes(search.toLowerCase())) ||
@@ -183,6 +232,7 @@ export default function PurchasesClient({ initialPurchases, suppliers, products 
       setNote('');
       setPaidAmount('0');
       setStatus(PurchaseStatus.RECEIVED);
+      localStorage.removeItem('draft_purchase_form');
 
       showMsg(
         language === 'en' ? 'Purchase logged successfully' : 'ਖਰੀਦ ਬਿੱਲ ਸਫਲਤਾਪੂਰਵਕ ਦਰਜ ਕਰ ਲਿਆ ਗਿਆ ਹੈ',

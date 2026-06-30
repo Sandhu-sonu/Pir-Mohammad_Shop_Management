@@ -7,6 +7,8 @@ import { getCurrentUser } from './auth';
 import { revalidatePath } from 'next/cache';
 import { prisma } from '../../db/prisma';
 import { TransactionType } from '@prisma/client';
+import { requirePermission } from '../permissions';
+import { handleActionError } from '../errors';
 
 export async function getProductsAction(filters: {
   search?: string;
@@ -17,6 +19,7 @@ export async function getProductsAction(filters: {
 }) {
   const user = await getCurrentUser();
   if (!user) throw new Error('Unauthorized');
+  requirePermission(user.role, 'products.read');
 
   return ProductService.listProducts({
     ...filters,
@@ -30,34 +33,47 @@ export async function addProductAction(data: {
   nameEn?: string;
   namePa?: string;
   category?: string;
+  brand?: string;
   purchasePrice: number;
   sellingPrice: number;
   currentQuantity: number;
   unit: string;
   minStock: number;
   supplierId?: string;
+
+  // Optional attributes (Phase 9)
+  manufacturer?: string;
+  modelNumber?: string;
+  batchNumber?: string;
+  expiryDate?: Date | string;
+  manufacturingDate?: Date | string;
+  warrantyMonths?: number;
+  serialNumber?: string;
+  imei?: string;
+  color?: string;
+  size?: string;
+  variant?: string;
+  hsnCode?: string;
+  gstRate?: number;
 }) {
   const user = await getCurrentUser();
   if (!user) throw new Error('Unauthorized');
+  requirePermission(user.role, 'products.create');
 
-  const result = await ProductService.addProduct({
-    sku: data.sku,
-    barcode: data.barcode,
-    nameEn: data.nameEn || '',
-    namePa: data.namePa || '',
-    category: data.category,
-    purchasePrice: data.purchasePrice,
-    sellingPrice: data.sellingPrice,
-    currentQuantity: data.currentQuantity,
-    unit: data.unit,
-    minStock: data.minStock,
-    supplierId: data.supplierId,
-    shopId: user.shopId,
-  });
+  try {
+    const result = await ProductService.addProduct({
+      ...data,
+      nameEn: data.nameEn || '',
+      namePa: data.namePa || '',
+      shopId: user.shopId,
+    });
 
-  revalidatePath('/inventory');
-  revalidatePath('/dashboard');
-  return { success: true, product: JSON.parse(JSON.stringify(result)) };
+    revalidatePath('/inventory');
+    revalidatePath('/dashboard');
+    return { success: true, product: JSON.parse(JSON.stringify(result)) };
+  } catch (err: any) {
+    return handleActionError(err);
+  }
 }
 
 export async function updateProductAction(
@@ -68,36 +84,63 @@ export async function updateProductAction(
     nameEn: string;
     namePa: string;
     category: string;
+    brand: string;
     purchasePrice: number;
     sellingPrice: number;
     unit: string;
     minStock: number;
     supplierId: string;
+
+    // Optional attributes (Phase 9)
+    manufacturer: string;
+    modelNumber: string;
+    batchNumber: string;
+    expiryDate: Date | string;
+    manufacturingDate: Date | string;
+    warrantyMonths: number;
+    serialNumber: string;
+    imei: string;
+    color: string;
+    size: string;
+    variant: string;
+    hsnCode: string;
+    gstRate: number;
   }>
 ) {
   const user = await getCurrentUser();
   if (!user) throw new Error('Unauthorized');
+  requirePermission(user.role, 'products.update');
 
-  const result = await ProductService.updateProduct(id, data);
+  try {
+    const result = await ProductService.updateProduct(id, data);
 
-  revalidatePath('/inventory');
-  return { success: true, product: JSON.parse(JSON.stringify(result)) };
+    revalidatePath('/inventory');
+    return { success: true, product: JSON.parse(JSON.stringify(result)) };
+  } catch (err: any) {
+    return handleActionError(err);
+  }
 }
 
 export async function deleteProductAction(id: string) {
   const user = await getCurrentUser();
   if (!user) throw new Error('Unauthorized');
+  requirePermission(user.role, 'products.delete');
 
-  await ProductService.deleteProduct(id);
+  try {
+    await ProductService.deleteProduct(id);
 
-  revalidatePath('/inventory');
-  revalidatePath('/dashboard');
-  return { success: true };
+    revalidatePath('/inventory');
+    revalidatePath('/dashboard');
+    return { success: true };
+  } catch (err: any) {
+    return handleActionError(err);
+  }
 }
 
 export async function getCategoriesAction() {
   const user = await getCurrentUser();
   if (!user) throw new Error('Unauthorized');
+  requirePermission(user.role, 'products.read');
 
   return ProductService.getCategories(user.shopId);
 }
@@ -105,6 +148,7 @@ export async function getCategoriesAction() {
 export async function getProductStockHistoryAction(productId: string) {
   const user = await getCurrentUser();
   if (!user) throw new Error('Unauthorized');
+  requirePermission(user.role, 'inventory.read');
 
   const transactions = await InventoryRepository.getTransactionHistory(productId);
   return JSON.parse(JSON.stringify(transactions));
@@ -113,12 +157,17 @@ export async function getProductStockHistoryAction(productId: string) {
 export async function importCsvAction(csvContent: string, filename: string = 'import.csv', mode: ImportMode = 'UPSERT') {
   const user = await getCurrentUser();
   if (!user) throw new Error('Unauthorized');
+  requirePermission(user.role, 'products.create');
 
-  const result = await ProductImportService.importCSV(user.shopId, filename, csvContent, mode);
+  try {
+    const result = await ProductImportService.importCSV(user.shopId, filename, csvContent, mode);
 
-  revalidatePath('/inventory');
-  revalidatePath('/dashboard');
-  return JSON.parse(JSON.stringify(result));
+    revalidatePath('/inventory');
+    revalidatePath('/dashboard');
+    return { success: true, ...JSON.parse(JSON.stringify(result)) };
+  } catch (err: any) {
+    return handleActionError(err);
+  }
 }
 
 export async function adjustStockAction(data: {
@@ -130,41 +179,51 @@ export async function adjustStockAction(data: {
 }) {
   const user = await getCurrentUser();
   if (!user) throw new Error('Unauthorized');
+  requirePermission(user.role, 'inventory.write');
 
-  const result = await prisma.$transaction(async (tx) => {
-    return InventoryRepository.adjustStock(tx, {
-      ...data,
-      userId: user.userId,
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      return InventoryRepository.adjustStock(tx, {
+        ...data,
+        userId: user.userId,
+      });
     });
-  });
 
-  revalidatePath('/inventory');
-  revalidatePath('/dashboard');
-  return JSON.parse(JSON.stringify(result));
+    revalidatePath('/inventory');
+    revalidatePath('/dashboard');
+    return { success: true, ...JSON.parse(JSON.stringify(result)) };
+  } catch (err: any) {
+    return handleActionError(err);
+  }
 }
 
 export async function dismissAlertAction(productId: string) {
   const user = await getCurrentUser();
   if (!user) throw new Error('Unauthorized');
+  requirePermission(user.role, 'inventory.write');
 
-  const alert = await prisma.stockAlert.findFirst({
-    where: {
-      productId,
-      status: 'ACTIVE',
-    },
-  });
-
-  if (alert) {
-    await prisma.stockAlert.update({
-      where: { id: alert.id },
-      data: {
-        status: 'DISMISSED',
-        isDismissed: true,
+  try {
+    const alert = await prisma.stockAlert.findFirst({
+      where: {
+        productId,
+        status: 'ACTIVE',
       },
     });
-  }
 
-  revalidatePath('/inventory');
-  revalidatePath('/dashboard');
-  return { success: true };
+    if (alert) {
+      await prisma.stockAlert.update({
+        where: { id: alert.id },
+        data: {
+          status: 'DISMISSED',
+          isDismissed: true,
+        },
+      });
+    }
+
+    revalidatePath('/inventory');
+    revalidatePath('/dashboard');
+    return { success: true };
+  } catch (err: any) {
+    return handleActionError(err);
+  }
 }

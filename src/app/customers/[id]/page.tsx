@@ -23,7 +23,7 @@ export default async function CustomerDetailPage({ params }: PageProps) {
   const ledger = await getCustomerLedgerAction(resolvedParams.id);
 
   return (
-    <Shell userName={user.name} shopName="Sher-E-Punjab Retail">
+    <Shell userName={user.name} shopName={user.shopName || 'Punjab Shop'}>
       <CustomerProfileClient
         profile={profile}
         ledger={ledger}

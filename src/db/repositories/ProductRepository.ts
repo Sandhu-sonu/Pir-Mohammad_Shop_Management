@@ -40,6 +40,10 @@ export class ProductRepository {
         { namePa: { contains: search, mode: 'insensitive' } },
         { sku: { contains: search, mode: 'insensitive' } },
         { barcode: { contains: search, mode: 'insensitive' } },
+        { manufacturer: { contains: search, mode: 'insensitive' } },
+        { modelNumber: { contains: search, mode: 'insensitive' } },
+        { serialNumber: { contains: search, mode: 'insensitive' } },
+        { imei: { contains: search, mode: 'insensitive' } },
       ];
     }
 

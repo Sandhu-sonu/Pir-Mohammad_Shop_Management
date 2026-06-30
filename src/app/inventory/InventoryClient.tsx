@@ -15,7 +15,11 @@ import {
   adjustStockAction,
 } from '../../lib/actions/inventory';
 import { z } from 'zod';
-import { TransactionType } from '@prisma/client';
+import { TransactionType, BusinessType } from '@prisma/client';
+import { getBusinessProfile } from '../../lib/businessProfiles';
+import { useToastStore } from '../../lib/store/toast';
+import ConfirmDialog from '../../components/ui/ConfirmDialog';
+import { EmptyState } from '../../components/ui/EmptyState';
 import {
   Search,
   Filter,
@@ -32,6 +36,7 @@ import {
   Copy,
   PlusCircle,
   FileText,
+  Check,
 } from 'lucide-react';
 
 type ProductInputs = z.infer<typeof productSchema>;
@@ -52,6 +57,7 @@ interface InventoryClientProps {
     lowStockOnly: boolean;
     page: number;
   };
+  businessType?: BusinessType;
 }
 
 // EAN-13 Barcode generator
@@ -71,20 +77,52 @@ function generateEAN13(): string {
   return code + checksum.toString();
 }
 
+const METADATA_FIELDS: Record<string, { type: 'TEXT' | 'DATE' | 'NUMBER'; labelEn: string; labelPa: string }> = {
+  manufacturer: { type: 'TEXT', labelEn: 'Manufacturer', labelPa: 'ਨਿਰਮਾਤਾ (Manufacturer)' },
+  modelNumber: { type: 'TEXT', labelEn: 'Model Number', labelPa: 'ਮਾਡਲ ਨੰਬਰ (Model Number)' },
+  batchNumber: { type: 'TEXT', labelEn: 'Batch Number', labelPa: 'ਬੈਚ ਨੰਬਰ (Batch Number)' },
+  expiryDate: { type: 'DATE', labelEn: 'Expiry Date', labelPa: 'ਮਿਆਦ ਪੁੱਗਣ ਦੀ ਮਿਤੀ (Expiry Date)' },
+  manufacturingDate: { type: 'DATE', labelEn: 'Manufacturing Date', labelPa: 'ਬਣਾਉਣ ਦੀ ਮਿਤੀ (Mfg Date)' },
+  warrantyMonths: { type: 'NUMBER', labelEn: 'Warranty (Months)', labelPa: 'ਵਾਰੰਟੀ ਮਹੀਨੇ (Warranty Months)' },
+  serialNumber: { type: 'TEXT', labelEn: 'Serial Number', labelPa: 'ਸੀਰੀਅਲ ਨੰਬਰ (Serial Number)' },
+  imei: { type: 'TEXT', labelEn: 'IMEI Number', labelPa: 'IMEI ਨੰਬਰ (IMEI)' },
+  color: { type: 'TEXT', labelEn: 'Color', labelPa: 'ਰੰਗ (Color)' },
+  size: { type: 'TEXT', labelEn: 'Size', labelPa: 'ਸਾਈਜ਼ (Size)' },
+  variant: { type: 'TEXT', labelEn: 'Variant', labelPa: 'ਵੈਰੀਐਂਟ (Variant)' },
+  hsnCode: { type: 'TEXT', labelEn: 'HSN Code', labelPa: 'HSN ਕੋਡ (HSN)' },
+  gstRate: { type: 'NUMBER', labelEn: 'GST Rate (%)', labelPa: 'GST ਦਰ (%)' },
+};
+
 export default function InventoryClient({
   productsData,
   categories,
   suppliers,
   currentFilters,
+  businessType = 'GENERAL_STORE',
 }: InventoryClientProps) {
   const { t, language } = useTranslation();
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
+  const profile = getBusinessProfile(businessType);
+
+  const { showToast } = useToastStore();
+
   // Search & Filter state
   const [searchVal, setSearchVal] = useState(currentFilters.search);
   const [selectedCat, setSelectedCat] = useState(currentFilters.category);
   const [lowStockToggle, setLowStockToggle] = useState(currentFilters.lowStockOnly);
+
+  // Debounced search trigger
+  useEffect(() => {
+    if (searchVal === currentFilters.search) return;
+
+    const delayDebounceFn = setTimeout(() => {
+      applyFilters(searchVal, selectedCat, lowStockToggle, 1);
+    }, 400);
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [searchVal]);
 
   // UI state
   const [isAddEditOpen, setIsAddEditOpen] = useState(false);
@@ -98,8 +136,7 @@ export default function InventoryClient({
   // More options dropdown
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   
-  // Success toast
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   
   // Inline category creation state
   const [isCreatingCategoryInline, setIsCreatingCategoryInline] = useState(false);
@@ -163,11 +200,6 @@ export default function InventoryClient({
     }
   }, [isAddEditOpen, isQuickAddMode]);
 
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3000);
-  };
-
   // Keyboard navigation handler (Enter focuses the next input field)
   const handleKeyDown = (e: React.KeyboardEvent<HTMLFormElement>) => {
     if (e.key === 'Enter') {
@@ -225,7 +257,7 @@ export default function InventoryClient({
       lastSelectedCategory.current = trimmed;
       setIsCreatingCategoryInline(false);
       setInlineCategoryName('');
-      showToast(language === 'en' ? 'Category created inline' : 'ਕੈਟੇਗਰੀ ਇਨਲਾਈਨ ਜੋੜੀ ਗਈ ✓');
+      showToast(language === 'en' ? 'Category created inline' : 'ਕੈਟੇਗਰੀ ਇਨਲਾਈਨ ਜੋੜੀ ਗਈ ✓', 'success');
     }
   };
 
@@ -234,7 +266,7 @@ export default function InventoryClient({
     let uniqueBarcode = generateEAN13();
     // In production we would do duplicate checks, here we populate EAN-13 directly
     setValue('barcode', uniqueBarcode);
-    showToast(language === 'en' ? 'EAN-13 Barcode generated' : 'ਬਾਰਕੋਡ ਤਿਆਰ ਕੀਤਾ ਗਿਆ ✓');
+    showToast(language === 'en' ? 'EAN-13 Barcode generated' : 'ਬਾਰਕੋਡ ਤਿਆਰ ਕੀਤਾ ਗਿਆ ✓', 'success');
   };
 
   // Submit product creation
@@ -268,13 +300,13 @@ export default function InventoryClient({
         if (res.success) {
           setIsAddEditOpen(false);
           setEditingProduct(null);
-          showToast(language === 'en' ? 'Product updated ✓' : 'ਉਤਪਾਦ ਅਪਡੇਟ ਹੋਇਆ ✓');
+          showToast(language === 'en' ? 'Product updated ✓' : 'ਉਤਪਾਦ ਅਪਡੇਟ ਹੋਇਆ ✓', 'success');
           router.refresh();
         }
       } else {
         const res = await addProductAction(payload);
-        if (res.success) {
-          showToast(language === 'en' ? 'Product Created ✓' : 'ਉਤਪਾਦ ਜੋੜਿਆ ਗਿਆ ✓');
+        if (res.success && 'product' in res) {
+          showToast(language === 'en' ? 'Product Created ✓' : 'ਉਤਪਾਦ ਜੋੜਿਆ ਗਿਆ ✓', 'success');
           setLastCreatedProduct(res.product);
 
           // Track last selections
@@ -307,7 +339,7 @@ export default function InventoryClient({
         }
       }
     } catch (err: any) {
-      alert(err.message || 'Error saving product');
+      showToast(err.message || 'Error saving product', 'error');
     } finally {
       setLoading(false);
     }
@@ -330,7 +362,7 @@ export default function InventoryClient({
     });
     setEditingProduct(null);
     setIsAddEditOpen(true);
-    showToast(language === 'en' ? 'Product settings duplicated. Enter name.' : 'ਉਤਪਾਦ ਕਾਪੀ ਹੋ ਗਿਆ। ਨਵਾਂ ਨਾਮ ਦਰਜ ਕਰੋ।');
+    showToast(language === 'en' ? 'Product settings duplicated. Enter name.' : 'ਉਤਪਾਦ ਕਾਪੀ ਹੋ ਗਿਆ। ਨਵਾਂ ਨਾਮ ਦਰਜ ਕਰੋ।', 'success');
   };
 
   const handleEditClick = (product: any) => {
@@ -351,16 +383,8 @@ export default function InventoryClient({
     setIsAddEditOpen(true);
   };
 
-  const handleDeleteClick = async (id: string, name: string) => {
-    if (confirm(language === 'en' ? `Are you sure you want to delete ${name}?` : `ਕੀ ਤੁਸੀਂ ਸੱਚਮੁੱਚ ${name} ਮਿਟਾਉਣਾ ਚਾਹੁੰਦੇ ਹੋ?`)) {
-      try {
-        await deleteProductAction(id);
-        showToast(language === 'en' ? 'Product deleted' : 'ਉਤਪਾਦ ਮਿਟਾਇਆ ਗਿਆ ✓');
-        router.refresh();
-      } catch (err: any) {
-        alert(err.message || 'Error deleting product');
-      }
-    }
+  const handleDeleteClick = (id: string, name: string) => {
+    setDeleteTarget({ id, name });
   };
 
   const handleHistoryClick = async (product: any) => {
@@ -370,7 +394,7 @@ export default function InventoryClient({
       setHistoryItems(history);
       setIsHistoryOpen(true);
     } catch (err: any) {
-      alert(err.message || 'Error loading stock history');
+      showToast(err.message || 'Error loading stock history', 'error');
     }
   };
 
@@ -381,12 +405,12 @@ export default function InventoryClient({
     try {
       setLoading(true);
       const res = await importCsvAction(csvText);
-      alert(`Import complete! Imported: ${res.importedCount}, Updated: ${res.updatedCount}, Failed: ${res.failedCount}`);
+      showToast(`Import complete! Imported: ${res.importedCount}, Updated: ${res.updatedCount}, Failed: ${res.failedCount}`, 'success');
       setIsCsvOpen(false);
       setCsvText('');
       router.refresh();
     } catch (err: any) {
-      alert(err.message || 'CSV Import failed');
+      showToast(err.message || 'CSV Import failed', 'error');
     } finally {
       setLoading(false);
     }
@@ -408,7 +432,7 @@ export default function InventoryClient({
     const price = parseFloat(adjustPrice);
 
     if (isNaN(qty) || qty === 0) {
-      alert(language === 'en' ? 'Enter a valid non-zero quantity' : 'ਸਹੀ ਮਾਤਰਾ ਦਰਜ ਕਰੋ (ਨਾਨ-ਜ਼ੀਰੋ)');
+      showToast(language === 'en' ? 'Enter a valid non-zero quantity' : 'ਸਹੀ ਮਾਤਰਾ ਦਰਜ ਕਰੋ (ਨਾਨ-ਜ਼ੀਰੋ)', 'warning');
       return;
     }
 
@@ -422,10 +446,10 @@ export default function InventoryClient({
         note: adjustNote.trim() || 'Manual stock adjustment from inventory panel',
       });
       setAdjustProduct(null);
-      showToast(language === 'en' ? 'Stock ledger transaction recorded ✓' : 'ਸਟਾਕ ਲੇਜਰ ਟ੍ਰਾਂਜੈਕਸ਼ਨ ਦਰਜ ਕੀਤੀ ਗਈ ✓');
+      showToast(language === 'en' ? 'Stock ledger transaction recorded ✓' : 'ਸਟਾਕ ਲੇਜਰ ਟ੍ਰਾਂਜੈਕਸ਼ਨ ਦਰਜ ਕੀਤੀ ਗਈ ✓', 'success');
       router.refresh();
     } catch (err: any) {
-      alert(err.message || 'Stock adjustment failed');
+      showToast(err.message || 'Stock adjustment failed', 'error');
     } finally {
       setLoading(false);
     }
@@ -438,13 +462,7 @@ export default function InventoryClient({
   return (
     <div className="space-y-6">
       
-      {/* TOAST SUCCESS BANNER */}
-      {toastMessage && (
-        <div className="fixed top-4 right-4 z-[999] bg-emerald-600 text-white px-4 py-3 rounded-lg shadow-xl font-semibold flex items-center gap-2 animate-bounce">
-          <Check className="w-5 h-5" />
-          <span>{toastMessage}</span>
-        </div>
-      )}
+
 
       {/* FILTERING & ACTIONS BAR */}
       <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
@@ -568,8 +586,18 @@ export default function InventoryClient({
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-sm">
               {productsData.items.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-10 text-center text-slate-400 font-semibold">
-                    No products found.
+                  <td colSpan={7} className="py-6 text-center">
+                    <EmptyState
+                      icon={AlertTriangle}
+                      title="ਕੋਈ ਉਤਪਾਦ ਨਹੀਂ ਮਿਲਿਆ (No Products Found)"
+                      description="No Products Added Yet. Click 'Add Product' to create your first product."
+                      actionLabel="ਨਵਾਂ ਉਤਪਾਦ (Add Product)"
+                      onAction={() => {
+                        setEditingProduct(null);
+                        reset();
+                        setIsAddEditOpen(true);
+                      }}
+                    />
                   </td>
                 </tr>
               ) : (
@@ -777,7 +805,7 @@ export default function InventoryClient({
                         type="number"
                         step="any"
                         inputMode="decimal"
-                        value={getValues('purchasePrice')}
+                        value={getValues('purchasePrice') as any}
                         onChange={(e) => setValue('purchasePrice', parseFloat(e.target.value) || 0)}
                         placeholder="0"
                         className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-950 border border-slate-350 dark:border-slate-800 rounded-lg text-md font-bold focus:outline-none"
@@ -792,7 +820,7 @@ export default function InventoryClient({
                         type="number"
                         step="any"
                         inputMode="decimal"
-                        value={getValues('sellingPrice')}
+                        value={getValues('sellingPrice') as any}
                         onChange={(e) => setValue('sellingPrice', parseFloat(e.target.value) || 0)}
                         placeholder="0"
                         className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-950 border border-slate-350 dark:border-slate-800 rounded-lg text-md font-bold focus:outline-none text-blue-600"
@@ -809,7 +837,7 @@ export default function InventoryClient({
                       type="number"
                       step="any"
                       inputMode="numeric"
-                      value={getValues('currentQuantity')}
+                      value={getValues('currentQuantity') as any}
                       onChange={(e) => setValue('currentQuantity', parseFloat(e.target.value) || 0)}
                       placeholder="0"
                       className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-950 border border-slate-350 dark:border-slate-800 rounded-lg text-md font-bold focus:outline-none"
@@ -862,8 +890,12 @@ export default function InventoryClient({
                       </label>
                       <input
                         type="text"
-                        ref={nameEnInputRef}
                         {...register('nameEn')}
+                        ref={(e) => {
+                          const { ref } = register('nameEn');
+                          ref(e);
+                          nameEnInputRef.current = e;
+                        }}
                         className="mt-1.5 w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-350 dark:border-slate-800 rounded-lg text-sm font-semibold focus:outline-none"
                         placeholder="e.g. Sugar 1kg"
                       />
@@ -1006,6 +1038,79 @@ export default function InventoryClient({
                       />
                     </div>
                   </div>
+
+                  {/* Dynamic business profile optional fields (Phase 9) */}
+                  {profile.fields.filter(f => f.visible && ![
+                    'sku', 'barcode', 'nameEn', 'namePa', 'categoryName',
+                    'brandName', 'purchasePrice', 'sellingPrice',
+                    'currentQuantity', 'unit', 'minStock', 'reorderLevel',
+                    'taxRate', 'isActive', 'supplierId'
+                  ].includes(f.name)).length > 0 && (
+                    <div className="border-t border-slate-200 dark:border-slate-800 pt-4 space-y-4">
+                      <h3 className="text-xs font-extrabold uppercase tracking-wider text-blue-600 dark:text-blue-400">
+                        {language === 'en' ? 'Industry Fields' : 'ਕਾਰੋਬਾਰ ਵਿਸ਼ੇਸ਼ ਜਾਣਕਾਰੀ'}
+                      </h3>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {profile.fields
+                          .filter(f => f.visible && ![
+                            'sku', 'barcode', 'nameEn', 'namePa', 'categoryName',
+                            'brandName', 'purchasePrice', 'sellingPrice',
+                            'currentQuantity', 'unit', 'minStock', 'reorderLevel',
+                            'taxRate', 'isActive', 'supplierId'
+                          ].includes(f.name))
+                          .map(field => {
+                            const meta = METADATA_FIELDS[field.name];
+                            if (!meta) return null;
+
+                            const isRequired = field.required;
+                            const labelText = (language === 'en' ? meta.labelEn : meta.labelPa) + (isRequired ? ' *' : '');
+                            const inputName = field.name as any;
+
+                            if (meta.type === 'DATE') {
+                              return (
+                                <div key={field.name}>
+                                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">{labelText}</label>
+                                  <input
+                                    type="date"
+                                    {...register(inputName)}
+                                    className="mt-1.5 w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-350 dark:border-slate-800 rounded-lg text-sm focus:outline-none"
+                                    required={isRequired}
+                                  />
+                                </div>
+                              );
+                            }
+
+                            if (meta.type === 'NUMBER') {
+                              return (
+                                <div key={field.name}>
+                                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">{labelText}</label>
+                                  <input
+                                    type="number"
+                                    step="any"
+                                    {...register(inputName, { valueAsNumber: true })}
+                                    className="mt-1.5 w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-350 dark:border-slate-800 rounded-lg text-sm focus:outline-none"
+                                    required={isRequired}
+                                  />
+                                </div>
+                              );
+                            }
+
+                            return (
+                              <div key={field.name}>
+                                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">{labelText}</label>
+                                  <input
+                                    type="text"
+                                    {...register(inputName)}
+                                    className="mt-1.5 w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-350 dark:border-slate-800 rounded-lg text-sm focus:outline-none"
+                                    placeholder={language === 'en' ? `Enter ${meta.labelEn}` : `${meta.labelPa} ਦਰਜ ਕਰੋ`}
+                                    required={isRequired}
+                                  />
+                                </div>
+                            );
+                          })}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1286,6 +1391,29 @@ export default function InventoryClient({
           </div>
         </div>
       )}
+
+      {/* Confirm Product Delete Dialog */}
+      <ConfirmDialog
+        isOpen={deleteTarget !== null}
+        title={language === 'en' ? 'Delete Product?' : 'ਉਤਪਾਦ ਮਿਟਾਓ?'}
+        message={language === 'en' ? `Are you sure you want to delete "${deleteTarget?.name}"?` : `ਕੀ ਤੁਸੀਂ ਸੱਚਮੁੱਚ "${deleteTarget?.name}" ਨੂੰ ਮਿਟਾਉਣਾ ਚਾਹੁੰਦੇ ਹੋ?`}
+        confirmLabel={language === 'en' ? 'Delete' : 'ਮਿਟਾਓ'}
+        cancelLabel={language === 'en' ? 'Cancel' : 'ਰੱਦ ਕਰੋ'}
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          try {
+            await deleteProductAction(deleteTarget.id);
+            showToast(language === 'en' ? 'Product deleted ✓' : 'ਉਤਪਾਦ ਮਿਟਾਇਆ ਗਿਆ ✓', 'success');
+            router.refresh();
+          } catch (err: any) {
+            showToast(err.message || 'Error deleting product', 'error');
+          } finally {
+            setDeleteTarget(null);
+          }
+        }}
+        onClose={() => setDeleteTarget(null)}
+        isDestructive={true}
+      />
     </div>
   );
 }

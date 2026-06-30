@@ -24,9 +24,45 @@
   }
   .print-area {
     display: block !important;
-    width: 100% !important;
     position: absolute;
     left: 0;
     top: 0;
+    margin: 0;
+    padding: 0;
+  }
+
+  /* Thermal printer size adjustments */
+  .print-THERMAL_58 {
+    width: 58mm !important;
+    font-size: 10px !important;
+  }
+  .print-THERMAL_58 table {
+    font-size: 9px !important;
+  }
+  .print-THERMAL_58 th, .print-THERMAL_58 td {
+    padding: 2px !important;
+  }
+  .print-THERMAL_80 {
+    width: 80mm !important;
+    font-size: 12px !important;
+  }
+  .print-THERMAL_80 table {
+    font-size: 11px !important;
+  }
+  .print-A4 {
+    width: 100% !important;
+    max-width: 210mm !important;
+    padding: 10px !important;
+  }
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateY(1rem);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
   }
 }

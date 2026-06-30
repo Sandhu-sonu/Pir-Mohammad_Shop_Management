@@ -1,5 +1,5 @@
 import { prisma } from '../prisma';
-import { Prisma, SupplierLedgerType, TransactionType } from '@prisma/client';
+import { Prisma, SupplierLedgerType, TransactionType, PaymentMethod } from '@prisma/client';
 import { InventoryRepository } from './InventoryRepository';
 
 export interface PurchaseItemInput {
@@ -15,6 +15,7 @@ export interface CreatePurchaseInput {
   invoiceNumber?: string;
   note?: string;
   paidAmount: number;
+  paymentMethod?: PaymentMethod;
 }
 
 export class SupplierRepository {
@@ -159,6 +160,7 @@ export class SupplierRepository {
             type: SupplierLedgerType.PAYMENT,
             amount: paid.negated(),
             balanceAfter: newBalance,
+            paymentMethod: data.paymentMethod || 'CASH',
             referenceId: purchase.id,
             note: `Payment Paid for Purchase: ${invoiceNumber || purchase.id}`,
           },
@@ -169,12 +171,12 @@ export class SupplierRepository {
     });
   }
 
-  static async paySupplier(shopId: string, supplierId: string, amount: number, note?: string) {
+  static async paySupplier(shopId: string, supplierId: string, amount: number, note?: string, paymentMethod: PaymentMethod = 'CASH') {
     if (amount <= 0) {
       throw new Error('Payment amount must be greater than zero');
     }
 
-    return prisma.$transaction(async (tx) => {
+    return prisma.$transaction(async (tx: any) => {
       const supplier = await tx.supplier.findUnique({
         where: { id: supplierId },
       });
@@ -197,6 +199,7 @@ export class SupplierRepository {
           type: SupplierLedgerType.PAYMENT,
           amount: paymentDecimal.negated(),
           balanceAfter: newBalance,
+          paymentMethod,
           note: note || 'Supplier Payment',
         },
       });

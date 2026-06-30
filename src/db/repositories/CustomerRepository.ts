@@ -1,5 +1,5 @@
 import { prisma } from '../prisma';
-import { Prisma, CustomerLedgerType } from '@prisma/client';
+import { Prisma, CustomerLedgerType, PaymentMethod } from '@prisma/client';
 
 export interface CustomerFilterInput {
   search?: string;
@@ -102,7 +102,7 @@ export class CustomerRepository {
     });
   }
 
-  static async receivePayment(shopId: string, customerId: string, amount: number, note?: string) {
+  static async receivePayment(shopId: string, customerId: string, amount: number, note?: string, paymentMethod: PaymentMethod = 'CASH') {
     const paymentAmount = new Prisma.Decimal(amount.toString());
 
     return prisma.$transaction(async (tx) => {
@@ -120,6 +120,7 @@ export class CustomerRepository {
         data: {
           customerId,
           amount: paymentAmount,
+          paymentMethod,
           note,
         },
       });

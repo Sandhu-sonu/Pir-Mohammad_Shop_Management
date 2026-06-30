@@ -17,6 +17,21 @@ export const productSchema = z.object({
   unit: z.string().optional().default('PCS'),
   minStock: z.coerce.number().min(0, { message: 'Min stock alert must be positive' }).optional().default(5),
   supplierId: z.string().optional().or(z.literal('')),
+
+  // Optional attributes (Phase 9)
+  manufacturer: z.string().optional().or(z.literal('')),
+  modelNumber: z.string().optional().or(z.literal('')),
+  batchNumber: z.string().optional().or(z.literal('')),
+  expiryDate: z.string().optional().or(z.literal('')),
+  manufacturingDate: z.string().optional().or(z.literal('')),
+  warrantyMonths: z.coerce.number().optional(),
+  serialNumber: z.string().optional().or(z.literal('')),
+  imei: z.string().optional().or(z.literal('')),
+  color: z.string().optional().or(z.literal('')),
+  size: z.string().optional().or(z.literal('')),
+  variant: z.string().optional().or(z.literal('')),
+  hsnCode: z.string().optional().or(z.literal('')),
+  gstRate: z.coerce.number().optional(),
 }).refine(data => (data.nameEn && data.nameEn.trim().length > 0) || (data.namePa && data.namePa.trim().length > 0), {
   message: 'At least one name (English or Punjabi) is required',
   path: ['nameEn']
@@ -31,14 +46,19 @@ export const customerSchema = z.object({
 });
 
 export const expenseSchema = z.object({
-  category: z.enum(['SALARY', 'RENT', 'ELECTRICITY', 'TRANSPORT', 'MISC']),
+  category: z.string().min(1, { message: 'Category is required' }),
   amount: z.coerce.number().gt(0, { message: 'Amount must be greater than zero' }),
   description: z.string().optional(),
+  paymentMethod: z.enum(['CASH', 'UPI', 'BANK_TRANSFER', 'CARD', 'CREDIT']).optional().default('CASH'),
+  notes: z.string().optional(),
   date: z.string().optional(),
 });
 
 export const closingSchema = z.object({
   openingCash: z.coerce.number().min(0, { message: 'Opening cash must be positive' }),
   closingCash: z.coerce.number().min(0, { message: 'Closing cash must be positive' }),
+  withdrawals: z.coerce.number().min(0, { message: 'Withdrawals must be positive' }).optional().default(0),
   notes: z.string().optional(),
+  staffSignature: z.string().optional().or(z.literal('')),
+  ownerSignature: z.string().optional().or(z.literal('')),
 });

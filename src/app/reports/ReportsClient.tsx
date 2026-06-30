@@ -1,364 +1,493 @@
 'use client';
 
-import React, { useState } from 'react';
-import { useTranslation } from '../../hooks/useTranslation';
+import React, { useState, useEffect } from 'react';
+import { getSalesReportDataAction, getExpensesReportDataAction, getDailyClosingReportDataAction, getOutstandingCustomersAction, getOutstandingSuppliersAction, getInventoryValuationAction } from '@/lib/actions/reports';
+import { getProfitReportAction } from '@/lib/actions/profit';
+import { Download, FileSpreadsheet, FileText, Filter, Calendar } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
-import {
-  FileSpreadsheet,
-  FileText,
-  TrendingUp,
-  PackageCheck,
-  UserX,
-  Zap,
-  ChevronRight,
-} from 'lucide-react';
 
 interface ReportsClientProps {
-  salesReport: any[];
-  inventoryReport: any[];
-  duesReport: any[];
-  fastMoving: any[];
-  slowMoving: any[];
+  userRole: string;
 }
 
-type ReportTab = 'sales' | 'inventory' | 'dues' | 'velocity';
+export default function ReportsClient({ userRole }: ReportsClientProps) {
+  const [reportType, setReportType] = useState<string>('sales');
+  
+  // Date ranges: default to last 30 days
+  const [startDate, setStartDate] = useState<string>(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    return d.toISOString().slice(0, 10);
+  });
+  const [endDate, setEndDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  
+  const [loading, setLoading] = useState(false);
+  const [data, setData] = useState<any[]>([]);
+  const [profitSummary, setProfitSummary] = useState<any>(null);
 
-export default function ReportsClient({
-  salesReport,
-  inventoryReport,
-  duesReport,
-  fastMoving,
-  slowMoving,
-}: ReportsClientProps) {
-  const { t, language } = useTranslation();
-  const [activeTab, setActiveTab] = useState<ReportTab>('sales');
+  // Filters for local search/refinements
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('ALL');
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState('ALL');
+
+  // Load report data on configuration changes
+  useEffect(() => {
+    fetchReportData();
+  }, [reportType, startDate, endDate]);
+
+  const fetchReportData = async () => {
+    setLoading(true);
+    try {
+      let result: any = [];
+      if (reportType === 'sales') {
+        result = await getSalesReportDataAction(startDate, endDate);
+      } else if (reportType === 'expenses') {
+        result = await getExpensesReportDataAction(startDate, endDate);
+      } else if (reportType === 'profit') {
+        const summary = await getProfitReportAction(startDate, endDate);
+        setProfitSummary(summary);
+        // Map summary values to array row for display
+        result = [
+          { metric: 'ਕੁੱਲ ਵਿਕਰੀ (Revenue)', value: summary.revenue },
+          { metric: 'ਖਰੀਦ ਮੁੱਲ (COGS)', value: summary.cogs },
+          { metric: 'ਕੁੱਲ ਲਾਭ (Gross Profit)', value: summary.grossProfit },
+          { metric: 'ਖਰਚੇ (Expenses)', value: summary.expenses },
+          { metric: 'ਸ਼ੁੱਧ ਮੁਨਾਫਾ (Net Profit)', value: summary.netProfit },
+          { metric: 'ਮੁਨਾਫਾ ਦਰ (Profit %)', value: `${summary.profitPercentage}%` },
+        ];
+      } else if (reportType === 'closing') {
+        result = await getDailyClosingReportDataAction(startDate, endDate);
+      } else if (reportType === 'customer_outstanding') {
+        result = await getOutstandingCustomersAction();
+      } else if (reportType === 'supplier_outstanding') {
+        result = await getOutstandingSuppliersAction();
+      } else if (reportType === 'inventory_valuation') {
+        result = await getInventoryValuationAction();
+      }
+      setData(result);
+    } catch (err) {
+      console.error('Failed to load report data:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Local filtering helper
+  const getFilteredData = () => {
+    if (reportType === 'profit') return data;
+
+    return data.filter((row: any) => {
+      // 1. Category filter (for inventory valuation or expenses)
+      if (selectedCategory !== 'ALL') {
+        const catMatch = row.category && String(row.category).toUpperCase() === selectedCategory.toUpperCase();
+        if (!catMatch) return false;
+      }
+
+      // 2. Payment Method filter (for sales, expenses, or payments)
+      if (selectedPaymentMethod !== 'ALL') {
+        const methodMatch = row.paymentMethod && String(row.paymentMethod).toUpperCase() === selectedPaymentMethod.toUpperCase();
+        if (!methodMatch) return false;
+      }
+
+      // 3. Global search
+      if (!searchTerm) return true;
+      const term = searchTerm.toLowerCase();
+
+      const nameMatch = row.name && row.name.toLowerCase().includes(term);
+      const nameEnMatch = row.nameEn && row.nameEn.toLowerCase().includes(term);
+      const namePaMatch = row.namePa && row.namePa.toLowerCase().includes(term);
+      const skuMatch = row.sku && row.sku.toLowerCase().includes(term);
+      const noteMatch = row.notes && row.notes.toLowerCase().includes(term);
+      const customerMatch = row.customer?.name && row.customer.name.toLowerCase().includes(term);
+      const userMatch = (row.user?.name || row.createdByUser?.name) && (row.user?.name || row.createdByUser?.name).toLowerCase().includes(term);
+
+      return nameMatch || nameEnMatch || namePaMatch || skuMatch || noteMatch || customerMatch || userMatch;
+    });
+  };
+
+  const filteredData = getFilteredData();
+
+  // Export handlers
+  const getExportFileName = () => {
+    return `${reportType}_report_${startDate}_to_${endDate}`;
+  };
+
+  const exportCSV = () => {
+    if (filteredData.length === 0) return;
+    const headers = getExportHeaders();
+    const rows = filteredData.map(getExportRow);
+    
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(val => `"${String(val).replace(/"/g, '""')}"`).join(','))
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `${getExportFileName()}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   const exportExcel = () => {
-    let dataToExport: any[] = [];
-    let filename = '';
+    if (filteredData.length === 0) return;
+    const headers = getExportHeaders();
+    const rows = filteredData.map(getExportRow);
 
-    if (activeTab === 'sales') {
-      dataToExport = salesReport;
-      filename = 'sales_report.xlsx';
-    } else if (activeTab === 'inventory') {
-      dataToExport = inventoryReport;
-      filename = 'inventory_report.xlsx';
-    } else if (activeTab === 'dues') {
-      dataToExport = duesReport;
-      filename = 'customer_dues_report.xlsx';
-    } else if (activeTab === 'velocity') {
-      dataToExport = fastMoving.map((p, idx) => ({
-        Rank: idx + 1,
-        Product: p.nameEn,
-        SoldQty: p.qtySold,
-        Unit: p.unit,
-      }));
-      filename = 'product_velocity_report.xlsx';
-    }
-
-    const worksheet = XLSX.utils.json_to_sheet(dataToExport);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Report');
-    XLSX.writeFile(workbook, filename);
+    // Build worksheet data
+    const wsData = [headers, ...rows];
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Report Data');
+    XLSX.writeFile(wb, `${getExportFileName()}.xlsx`);
   };
 
-  const exportPdf = () => {
-    const doc = new jsPDF() as any;
-    doc.text(`${t('reports')} - ${activeTab.toUpperCase()}`, 14, 15);
+  const exportPDF = () => {
+    if (filteredData.length === 0) return;
+    const doc = new jsPDF();
+    const title = getReportTitle();
+    
+    doc.setFontSize(16);
+    doc.text(title, 14, 15);
+    
+    doc.setFontSize(10);
+    doc.text(`Period: ${startDate} to ${endDate}`, 14, 21);
+    doc.text(`Generated by: ${userRole}`, 14, 27);
 
-    let columns: string[] = [];
-    let rows: any[][] = [];
+    const headers = getExportHeaders();
+    const rows = filteredData.map(getExportRow);
 
-    if (activeTab === 'sales') {
-      columns = ['Date', 'Total Sales (INR)', 'Paid Amount (INR)', 'Due Amount (INR)'];
-      rows = salesReport.map((s) => [s.date, `Rs ${s.total}`, `Rs ${s.paid}`, `Rs ${s.due}`]);
-    } else if (activeTab === 'inventory') {
-      columns = ['SKU', 'Product Name', 'Stock Qty', 'Purchase Rate', 'Selling Rate', 'Valuation'];
-      rows = inventoryReport.map((p) => [
-        p.sku,
-        p.nameEn,
-        `${p.quantity} ${p.unit}`,
-        `Rs ${p.purchasePrice}`,
-        `Rs ${p.sellingPrice}`,
-        `Rs ${p.totalValue}`,
-      ]);
-    } else if (activeTab === 'dues') {
-      columns = ['Customer Name', 'Mobile', 'Outstanding Dues (INR)'];
-      rows = duesReport.map((c) => [c.name, c.mobile, `Rs ${c.dueAmount}`]);
-    } else if (activeTab === 'velocity') {
-      columns = ['Rank', 'Fast Moving Product', 'Quantity Sold', 'Slow Moving Product', 'Quantity Sold'];
-      rows = fastMoving.map((f, idx) => {
-        const s = slowMoving[idx] || { nameEn: '-', qtySold: 0, unit: '' };
-        return [
-          idx + 1,
-          f.nameEn,
-          `${f.qtySold} ${f.unit}`,
-          s.nameEn,
-          `${s.qtySold} ${s.unit}`,
-        ];
-      });
-    }
-
-    doc.autoTable({
-      head: [columns],
+    (doc as any).autoTable({
+      head: [headers],
       body: rows,
-      startY: 22,
+      startY: 33,
+      theme: 'grid',
+      styles: { fontSize: 8 },
+      headStyles: { fillColor: [79, 70, 229] }
     });
 
-    doc.save(`${activeTab}_report.pdf`);
+    doc.save(`${getExportFileName()}.pdf`);
   };
 
-  const tabs: { id: ReportTab; label: string; icon: any }[] = [
-    { id: 'sales', label: 'ਵਿਕਰੀ ਰਿਪੋਰਟ (Sales)', icon: TrendingUp },
-    { id: 'inventory', label: 'ਸਟਾਕ ਵੈਲਯੂਏਸ਼ਨ (Stock Value)', icon: PackageCheck },
-    { id: 'dues', label: 'ਬਾਕਾਇਆ ਉਧਾਰ (Customer Dues)', icon: UserX },
-    { id: 'velocity', label: 'ਉਤਪਾਦ ਗਤੀ (Product Velocity)', icon: Zap },
+  // Setup report headers and columns dynamically
+  const getReportTitle = () => {
+    switch (reportType) {
+      case 'sales': return 'Sales Report (ਵਿਕਰੀ ਰਿਪੋਰਟ)';
+      case 'expenses': return 'Expense Report (ਖਰਚਾ ਰਿਪੋਰტ)';
+      case 'profit': return 'Profit Engine Report (ਮੁਨਾਫਾ ਰਿਪੋਰਟ)';
+      case 'closing': return 'Daily Closing Report (ਰੋਜ਼ਾਨਾ ਕਲੋਜ਼ਿੰਗ)';
+      case 'customer_outstanding': return 'Customer Outstanding Udhaar (ਗਾਹਕਾਂ ਦਾ ਉਧਾਰ)';
+      case 'supplier_outstanding': return 'Supplier Dues (ਸਪਲਾਇਰਾਂ ਦੇ ਬਕਾਏ)';
+      case 'inventory_valuation': return 'Inventory Valuation (ਸਟਾਕ ਮੁਲਾਂਕਣ)';
+      default: return 'Business Report';
+    }
+  };
+
+  const getExportHeaders = () => {
+    switch (reportType) {
+      case 'sales':
+        return ['Date', 'Invoice No', 'Customer', 'Payment Method', 'Paid Amount', 'Total Amount', 'Created By', 'Status'];
+      case 'expenses':
+        return ['Date', 'Category', 'Amount', 'Payment Method', 'Description', 'Notes', 'Created By', 'Status'];
+      case 'profit':
+        return ['Business Metric', 'Value (Rs)'];
+      case 'closing':
+        return ['Date', 'Opening Cash', 'Cash Sales', 'Expected Cash', 'Actual Cash Count', 'Difference', 'Withdrawals', 'Closed By', 'Status'];
+      case 'customer_outstanding':
+        return ['Customer Name', 'Mobile', 'Opening Udhaar', 'Current Udhaar Balance'];
+      case 'supplier_outstanding':
+        return ['Supplier Name', 'Mobile', 'GST No', 'Owed Balance'];
+      case 'inventory_valuation':
+        return ['Product Name', 'SKU', 'Stock Qty', 'Purchase Price', 'Selling Price', 'Inventory Cost Value', 'Expected Sales Value'];
+      default:
+        return [];
+    }
+  };
+
+  const getExportRow = (row: any) => {
+    switch (reportType) {
+      case 'sales':
+        return [
+          new Date(row.date).toLocaleString(),
+          row.invoiceNumber || row.id.slice(0, 8),
+          row.customer?.name || 'Walk-in Customer',
+          row.paymentMethod,
+          row.paidAmount,
+          row.total,
+          row.createdByUser?.name || 'System',
+          row.isReversed ? 'REVERSED' : 'ACTIVE'
+        ];
+      case 'expenses':
+        return [
+          new Date(row.date).toLocaleDateString(),
+          row.category,
+          row.amount,
+          row.paymentMethod,
+          row.description || '',
+          row.notes || '',
+          row.user?.name || 'System',
+          row.isReversed ? 'REVERSED' : 'ACTIVE'
+        ];
+      case 'profit':
+        return [row.metric, row.value];
+      case 'closing':
+        return [
+          new Date(row.date).toLocaleDateString(),
+          row.openingCash,
+          row.salesCash,
+          row.openingCash + row.salesCash + row.paymentsReceivedCash - row.expensesCash - row.supplierPaymentsCash - row.withdrawals,
+          row.closingCash,
+          row.difference,
+          row.withdrawals,
+          row.user?.name || 'System',
+          row.isReversed ? 'REVERSED' : 'LOCKED'
+        ];
+      case 'customer_outstanding':
+        return [row.name, row.mobile || '', row.openingBalance, row.currentBalance];
+      case 'supplier_outstanding':
+        return [row.name, row.mobile || '', row.gst || '', row.currentBalance];
+      case 'inventory_valuation':
+        const qty = parseFloat(row.currentQuantity);
+        const cost = parseFloat(row.purchasePrice);
+        const sell = parseFloat(row.sellingPrice);
+        return [
+          row.nameEn || row.name,
+          row.sku,
+          qty,
+          cost,
+          sell,
+          (qty * cost).toFixed(2),
+          (qty * sell).toFixed(2)
+        ];
+      default:
+        return [];
+    }
+  };
+
+  // List of standard expense categories for filters
+  const defaultCategories = [
+    'Salary', 'Rent', 'Electricity', 'Internet', 'Transport', 'Tea & Refreshments', 'Shop Maintenance', 'Stationery', 'Miscellaneous'
   ];
 
   return (
-    <div className="space-y-6">
-      
-      {/* Export & Actions Top Header */}
-      <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col sm:flex-row justify-between items-center gap-4">
-        
-        {/* Tab triggers */}
-        <div className="flex flex-wrap gap-2 w-full sm:w-auto">
-          {tabs.map((tab) => {
-            const Icon = tab.icon;
-            const active = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`px-4 py-2.5 rounded-lg text-xs font-bold flex items-center gap-2 border transition-all ${
-                  active
-                    ? 'bg-blue-600 border-blue-600 text-white shadow-sm'
-                    : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-850 hover:bg-slate-100'
-                }`}
-              >
-                <Icon className="w-4 h-4" />
-                {tab.label}
-              </button>
-            );
-          })}
+    <div className="space-y-6 max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
+      {/* Header */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-white dark:bg-zinc-900 p-6 rounded-2xl border border-zinc-100 dark:border-zinc-800 shadow-sm">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-zinc-900 dark:text-white tracking-tight">
+            ਰਿਪੋਰਟਸ ਅਤੇ ਵਿਸ਼ਲੇਸ਼ਣ (Reports & Analytics)
+          </h1>
+          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+            Export tax summaries, profits, outstanding balances, and custom date range records.
+          </p>
         </div>
 
-        {/* Action triggers */}
-        <div className="flex gap-2 w-full sm:w-auto shrink-0">
+        {/* Exporters */}
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={exportCSV}
+            disabled={filteredData.length === 0}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-semibold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-xl transition duration-200 disabled:opacity-50"
+          >
+            <Download className="w-4 h-4" />
+            CSV
+          </button>
           <button
             onClick={exportExcel}
-            className="flex-1 sm:flex-initial px-4 py-2.5 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-450 border border-emerald-200 dark:border-emerald-900 rounded-lg text-xs font-bold flex items-center justify-center gap-2 hover:bg-emerald-100"
+            disabled={filteredData.length === 0}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-semibold bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 rounded-xl transition duration-200 disabled:opacity-50"
           >
             <FileSpreadsheet className="w-4 h-4" />
-            {t('exportExcel')}
+            Excel
           </button>
-          
           <button
-            onClick={exportPdf}
-            className="flex-1 sm:flex-initial px-4 py-2.5 bg-rose-50 dark:bg-rose-950/20 text-rose-700 dark:text-rose-450 border border-rose-200 dark:border-rose-900 rounded-lg text-xs font-bold flex items-center justify-center gap-2 hover:bg-rose-105"
+            onClick={exportPDF}
+            disabled={filteredData.length === 0}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-semibold bg-indigo-50 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 rounded-xl transition duration-200 disabled:opacity-50"
           >
             <FileText className="w-4 h-4" />
-            {t('exportPdf')}
+            PDF
           </button>
         </div>
       </div>
 
-      {/* Reports Tables Output */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-sm overflow-hidden p-6">
+      {/* Configuration Panels */}
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         
-        {/* Tab 1: Sales Summary table */}
-        {activeTab === 'sales' && (
-          <div className="space-y-4">
-            <h3 className="text-md font-bold text-slate-800 dark:text-slate-205 border-b pb-2">ਰੋਜ਼ਾਨਾ ਵਿਕਰੀ ਦਾ ਲੇਖਾ-ਜੋਖਾ (Daily Sales Summary)</h3>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm whitespace-nowrap">
-                <thead>
-                  <tr className="border-b border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-500 uppercase tracking-wider">
-                    <th className="py-3 px-4">{t('date')}</th>
-                    <th className="py-3 px-4 text-right">ਕੁੱਲ ਵਿਕਰੀ (Total Sales)</th>
-                    <th className="py-3 px-4 text-right">ਪ੍ਰਾਪਤ ਨਕਦ (Paid Amount)</th>
-                    <th className="py-3 px-4 text-right">ਬਾਕਾਇਆ ਉਧਾਰ (Dues)</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {salesReport.length === 0 ? (
-                    <tr>
-                      <td colSpan={4} className="py-8 text-center text-slate-400 font-semibold">No sales found in database.</td>
-                    </tr>
-                  ) : (
-                    salesReport.map((s, idx) => (
-                      <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-850/40">
-                        <td className="py-3.5 px-4 font-medium">{s.date}</td>
-                        <td className="py-3.5 px-4 text-right font-extrabold text-blue-600">₹{s.total.toFixed(2)}</td>
-                        <td className="py-3.5 px-4 text-right font-bold text-emerald-600">₹{s.paid.toFixed(2)}</td>
-                        <td className="py-3.5 px-4 text-right font-bold text-amber-600">₹{s.due.toFixed(2)}</td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+        {/* Sidebar: Report Selectors & Time Boundaries */}
+        <div className="lg:col-span-1 space-y-6">
+          <div className="bg-white dark:bg-zinc-900 p-6 rounded-2xl border border-zinc-100 dark:border-zinc-800 shadow-sm space-y-4">
+            <h2 className="text-md font-bold text-zinc-800 dark:text-zinc-200 flex items-center gap-2 border-b border-zinc-100 dark:border-zinc-850 pb-3">
+              <Filter className="w-4 h-4 text-indigo-500" />
+              ਰਿਪੋਰਟ ਚੁਣੋ (Select Report)
+            </h2>
+            
+            <div className="flex flex-col gap-1">
+              {[
+                { id: 'sales', label: 'ਵਿਕਰੀ ਰਿਪੋਰਟ (Sales)' },
+                { id: 'expenses', label: 'ਖਰਚਾ ਰਿਪੋਰਟ (Expenses)' },
+                { id: 'profit', label: 'ਮੁਨਾਫਾ ਇੰਜਣ (Profit Engine)' },
+                { id: 'closing', label: 'ਰੋਜ਼ਾਨਾ ਕਲੋਜ਼ਿੰਗ (Closings)' },
+                { id: 'customer_outstanding', label: 'ਗਾਹਕ ਉਧਾਰ (Outstanding Customer)' },
+                { id: 'supplier_outstanding', label: 'ਸਪਲਾਇਰ ਬਕਾਇਆ (Outstanding Supplier)' },
+                { id: 'inventory_valuation', label: 'ਸਟਾਕ ਮੁਲਾਂਕਣ (Stock Valuation)' },
+              ].map((item) => (
+                <button
+                  key={item.id}
+                  onClick={() => setReportType(item.id)}
+                  className={`w-full text-left px-3 py-2 rounded-xl text-xs font-semibold transition ${
+                    reportType === item.id
+                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-650/20'
+                      : 'text-zinc-650 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-850'
+                  }`}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Date Picker (conditionally rendered for range dependent reports) */}
+            {['sales', 'expenses', 'profit', 'closing'].includes(reportType) && (
+              <div className="space-y-3 pt-3 border-t border-zinc-100 dark:border-zinc-850">
+                <h3 className="text-xs font-bold text-zinc-700 dark:text-zinc-350 flex items-center gap-1">
+                  <Calendar className="w-3.5 h-3.5 text-indigo-500" />
+                  ਸਮਾਂ ਸੀਮਾ (Timeframe)
+                </h3>
+                
+                <div className="space-y-2">
+                  <div>
+                    <label className="text-[10px] text-zinc-450 dark:text-zinc-500 block mb-1">From</label>
+                    <input
+                      type="date"
+                      value={startDate}
+                      onChange={(e) => setStartDate(e.target.value)}
+                      className="w-full text-xs bg-zinc-50 dark:bg-zinc-850 border border-zinc-200 dark:border-zinc-800 rounded-xl p-2 focus:ring-2 focus:ring-indigo-550 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-zinc-450 dark:text-zinc-500 block mb-1">To</label>
+                    <input
+                      type="date"
+                      value={endDate}
+                      onChange={(e) => setEndDate(e.target.value)}
+                      className="w-full text-xs bg-zinc-50 dark:bg-zinc-850 border border-zinc-200 dark:border-zinc-800 rounded-xl p-2 focus:ring-2 focus:ring-indigo-550 dark:text-white"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Main Content Area: Filters, Preview Table */}
+        <div className="lg:col-span-3 space-y-6">
+          
+          {/* Sub-Filters / Search */}
+          <div className="bg-white dark:bg-zinc-900 p-4 rounded-2xl border border-zinc-100 dark:border-zinc-800 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex-1">
+              <input
+                type="text"
+                placeholder="Search report details... (ਖੋਜ ਕਰੋ)"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full text-xs bg-zinc-50 dark:bg-zinc-850 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2 focus:ring-2 focus:ring-indigo-550 dark:text-white"
+              />
+            </div>
+            
+            <div className="flex gap-2">
+              {/* Payment Method filter for transaction reports */}
+              {['sales', 'expenses', 'closing'].includes(reportType) && (
+                <select
+                  value={selectedPaymentMethod}
+                  onChange={(e) => setSelectedPaymentMethod(e.target.value)}
+                  className="text-xs bg-zinc-50 dark:bg-zinc-850 border border-zinc-200 dark:border-zinc-800 rounded-xl p-2 dark:text-white focus:ring-2 focus:ring-indigo-500"
+                >
+                  <option value="ALL">All Payment Methods</option>
+                  <option value="CASH">Cash</option>
+                  <option value="UPI">UPI</option>
+                  <option value="BANK_TRANSFER">Bank Transfer</option>
+                  <option value="CARD">Card</option>
+                  <option value="CREDIT">Credit / Udhaar</option>
+                </select>
+              )}
             </div>
           </div>
-        )}
 
-        {/* Tab 2: Inventory summary table */}
-        {activeTab === 'inventory' && (
-          <div className="space-y-4">
-            <h3 className="text-md font-bold text-slate-800 dark:text-slate-205 border-b pb-2">ਸਟਾਕ ਵੈਲਯੂਏਸ਼ਨ ਅਤੇ ਮਾਰਜਿਨ (Stock Valuations)</h3>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm whitespace-nowrap">
-                <thead>
-                  <tr className="border-b border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-500 uppercase tracking-wider">
-                    <th className="py-3 px-4">{t('sku')}</th>
-                    <th className="py-3 px-4">ਉਤਪਾਦ ਦਾ ਨਾਮ</th>
-                    <th className="py-3 px-4 text-center">{t('quantity')}</th>
-                    <th className="py-3 px-4 text-right">ਖਰੀਦ ਕੀਮਤ</th>
-                    <th className="py-3 px-4 text-right">ਸਟਾਕ ਦੀ ਕੁੱਲ ਕੀਮਤ</th>
-                    <th className="py-3 px-4 text-right">ਸੰਭਾਵਿਤ ਵੇਚ</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {inventoryReport.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="py-8 text-center text-slate-400 font-semibold">No products in inventory.</td>
-                    </tr>
-                  ) : (
-                    inventoryReport.map((p, idx) => (
-                      <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-850/40">
-                        <td className="py-3.5 px-4 font-mono text-xs">{p.sku}</td>
-                        <td className="py-3.5 px-4">
-                          <div className="font-bold">{p.namePa}</div>
-                          <div className="text-xs text-slate-500 mt-0.5">{p.nameEn}</div>
-                        </td>
-                        <td className="py-3.5 px-4 text-center">
-                          <span className="px-2.5 py-1 text-xs font-bold rounded bg-slate-100 dark:bg-slate-800">
-                            {p.quantity} {p.unit}
-                          </span>
-                        </td>
-                        <td className="py-3.5 px-4 text-right font-semibold">₹{p.purchasePrice.toFixed(2)}</td>
-                        <td className="py-3.5 px-4 text-right font-extrabold text-blue-650">₹{p.totalValue.toFixed(2)}</td>
-                        <td className="py-3.5 px-4 text-right font-extrabold text-emerald-600">₹{p.potentialSales.toFixed(2)}</td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+          {/* Report Summary (Conditionally display metrics summary boxes) */}
+          {reportType === 'profit' && profitSummary && (
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+              {[
+                { title: 'ਕੁੱਲ ਵਿਕਰੀ (Revenue)', val: `Rs ${profitSummary.revenue}`, color: 'text-indigo-600 dark:text-indigo-400' },
+                { title: 'ਖਰੀਦ ਮੁੱਲ (COGS)', val: `Rs ${profitSummary.cogs}`, color: 'text-amber-600 dark:text-amber-500' },
+                { title: 'ਕੁੱਲ ਮੁਨਾਫਾ (Gross Profit)', val: `Rs ${profitSummary.grossProfit}`, color: 'text-emerald-600 dark:text-emerald-450' },
+                { title: 'ਦੁਕਾਨ ਦੇ ਖਰਚੇ (Expenses)', val: `Rs ${profitSummary.expenses}`, color: 'text-rose-600 dark:text-rose-450' },
+                { title: 'ਸ਼ੁੱਧ ਮੁਨਾਫਾ (Net Profit)', val: `Rs ${profitSummary.netProfit}`, color: profitSummary.netProfit >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-600 dark:text-red-400', isBold: true },
+                { title: 'ਲਾਭ ਦਰ % (Profit %)', val: `${profitSummary.profitPercentage}%`, color: 'text-indigo-600 dark:text-indigo-400' },
+              ].map((card, idx) => (
+                <div key={idx} className="bg-zinc-50 dark:bg-zinc-850 p-4 rounded-2xl border border-zinc-100 dark:border-zinc-800 flex flex-col justify-between">
+                  <span className="text-[10px] uppercase tracking-wider text-zinc-450 dark:text-zinc-500 font-semibold">{card.title}</span>
+                  <span className={`text-lg font-black tracking-tight mt-1 ${card.color} ${card.isBold ? 'text-xl' : ''}`}>{card.val}</span>
+                </div>
+              ))}
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Tab 3: Outstanding dues list */}
-        {activeTab === 'dues' && (
-          <div className="space-y-4">
-            <h3 className="text-md font-bold text-slate-800 dark:text-slate-205 border-b pb-2">ਉਧਾਰ ਦੇਣਦਾਰੀ ਸੂਚੀ (Pending Customer Balances)</h3>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm whitespace-nowrap">
-                <thead>
-                  <tr className="border-b border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-500 uppercase tracking-wider">
-                    <th className="py-3 px-4">ਗਾਹਕ ਦਾ ਨਾਮ</th>
-                    <th className="py-3 px-4">ਮੋਬਾਈਲ</th>
-                    <th className="py-3 px-4 text-right">ਬਾਕਾਇਆ ਰਕਮ (Dues Dues)</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {duesReport.length === 0 ? (
-                    <tr>
-                      <td colSpan={3} className="py-8 text-center text-slate-400 font-semibold">No customers with pending balances.</td>
-                    </tr>
-                  ) : (
-                    duesReport.map((c, idx) => (
-                      <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-850/40">
-                        <td className="py-3.5 px-4 font-bold">{c.name}</td>
-                        <td className="py-3.5 px-4 font-mono text-xs">{c.mobile}</td>
-                        <td className="py-3.5 px-4 text-right font-extrabold text-rose-600">₹{c.dueAmount.toFixed(2)}</td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* Tab 4: Velocity list */}
-        {activeTab === 'velocity' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            {/* Column 1: Fast moving */}
-            <div className="space-y-4">
-              <h3 className="text-md font-bold text-emerald-700 dark:text-emerald-400 border-b border-emerald-100 pb-2">
-                ਤੇਜ਼ੀ ਨਾਲ ਵਿਕਣ ਵਾਲਾ ਮਾਲ (Fast Moving Items)
+          {/* Preview Grid Table */}
+          <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-100 dark:border-zinc-800 shadow-sm overflow-hidden">
+            <div className="p-4 bg-zinc-50 dark:bg-zinc-850/50 border-b border-zinc-100 dark:border-zinc-800 flex justify-between items-center">
+              <h3 className="text-xs font-bold text-zinc-700 dark:text-zinc-350 uppercase tracking-wider">
+                ਰਿਪੋਰਟ ਪ੍ਰੀਵਿਊ (Report Preview - {filteredData.length} records)
               </h3>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm whitespace-nowrap">
-                  <thead>
-                    <tr className="border-b text-xs font-bold text-slate-550 uppercase">
-                      <th className="py-3 px-2">Rank</th>
-                      <th className="py-3 px-2">Item Name</th>
-                      <th className="py-3 px-2 text-right">Quantity Sold</th>
+            </div>
+
+            {loading ? (
+              <div className="flex flex-col items-center justify-center py-20">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+                <span className="text-xs text-zinc-550 dark:text-zinc-400 mt-2">ਕੁਝ ਸਮਾਂ ਉਡੀਕ ਕਰੋ... Loading Report Data...</span>
+              </div>
+            ) : filteredData.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-20 text-center">
+                <span className="text-xs font-bold text-zinc-450 dark:text-zinc-500">ਨੋ ਰਿਕਾਰਡ ਫਾਉਂਡ (No report records matching criteria)</span>
+                <span className="text-[10px] text-zinc-400 mt-1">Try widening your date filters or search terms.</span>
+              </div>
+            ) : (
+              <div className="overflow-x-auto max-h-[500px]">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead className="bg-zinc-50 dark:bg-zinc-850 text-zinc-700 dark:text-zinc-350 sticky top-0 font-bold border-b border-zinc-100 dark:border-zinc-800">
+                    <tr>
+                      {getExportHeaders().map((head, idx) => (
+                        <th key={idx} className="p-3 whitespace-nowrap">{head}</th>
+                      ))}
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                    {fastMoving.length === 0 ? (
-                      <tr>
-                        <td colSpan={3} className="py-6 text-center text-slate-400">No sales recorded.</td>
-                      </tr>
-                    ) : (
-                      fastMoving.map((p, idx) => (
-                        <tr key={idx}>
-                          <td className="py-3 px-2 font-bold">#{idx + 1}</td>
-                          <td className="py-3 px-2 font-semibold">
-                            <div>{p.namePa}</div>
-                            <div className="text-[10px] text-slate-500 mt-0.5">{p.nameEn}</div>
+                  <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800 text-zinc-750 dark:text-zinc-300">
+                    {filteredData.map((row: any, rowIdx: number) => (
+                      <tr
+                        key={rowIdx}
+                        className={`hover:bg-zinc-50/50 dark:hover:bg-zinc-850/30 transition-colors ${
+                          row.isReversed ? 'bg-red-50/30 dark:bg-red-950/10 text-zinc-400 line-through' : ''
+                        }`}
+                      >
+                        {getExportRow(row).map((val, cellIdx) => (
+                          <td key={cellIdx} className="p-3 whitespace-nowrap">
+                            {typeof val === 'number' && !isNaN(val) ? `Rs ${val.toLocaleString()}` : String(val)}
                           </td>
-                          <td className="py-3 px-2 text-right font-extrabold text-blue-600">{p.qtySold} {p.unit}</td>
-                        </tr>
-                      ))
-                    )}
+                        ))}
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
-            </div>
-
-            {/* Column 2: Slow moving */}
-            <div className="space-y-4">
-              <h3 className="text-md font-bold text-slate-500 border-b border-slate-200 pb-2">
-                ਹੌਲੀ ਵਿਕਣ ਵਾਲਾ ਮਾਲ (Slow Moving Items)
-              </h3>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm whitespace-nowrap">
-                  <thead>
-                    <tr className="border-b text-xs font-bold text-slate-550 uppercase">
-                      <th className="py-3 px-2">Rank</th>
-                      <th className="py-3 px-2">Item Name</th>
-                      <th className="py-3 px-2 text-right">Quantity Sold</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                    {slowMoving.length === 0 ? (
-                      <tr>
-                        <td colSpan={3} className="py-6 text-center text-slate-400">No products in catalog.</td>
-                      </tr>
-                    ) : (
-                      slowMoving.map((p, idx) => (
-                        <tr key={idx}>
-                          <td className="py-3 px-2 font-bold text-slate-500">#{idx + 1}</td>
-                          <td className="py-3 px-2">
-                            <div>{p.namePa}</div>
-                            <div className="text-[10px] text-slate-500 mt-0.5">{p.nameEn}</div>
-                          </td>
-                          <td className="py-3 px-2 text-right font-bold text-slate-550">{p.qtySold} {p.unit}</td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+            )}
           </div>
-        )}
 
+        </div>
       </div>
     </div>
   );

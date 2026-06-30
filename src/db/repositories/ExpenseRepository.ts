@@ -1,13 +1,61 @@
 import { prisma } from '../prisma';
-import { Prisma, ExpenseCategory } from '@prisma/client';
+import { Prisma, PaymentMethod } from '@prisma/client';
 
 export class ExpenseRepository {
-  static async create(data: Omit<Prisma.ExpenseCreateInput, 'shop'> & { shopId: string }) {
+  static async findById(id: string) {
+    return prisma.expense.findUnique({
+      where: { id },
+      include: {
+        user: true,
+        reversedByUser: true,
+      },
+    });
+  }
+
+  static async create(data: any) {
     const { shopId, ...rest } = data;
     return prisma.expense.create({
       data: {
         ...rest,
-        shop: { connect: { id: shopId } },
+        amount: new Prisma.Decimal(rest.amount.toString()),
+        shopId,
+      } as any,
+    });
+  }
+
+  static async update(
+    id: string,
+    data: Partial<{
+      category: string;
+      amount: number;
+      description: string;
+      paymentMethod: PaymentMethod;
+      notes: string;
+      date: Date;
+    }>
+  ) {
+    const updateData: Prisma.ExpenseUpdateInput = {};
+
+    if (data.category !== undefined) updateData.category = data.category;
+    if (data.amount !== undefined) updateData.amount = new Prisma.Decimal(data.amount.toString());
+    if (data.description !== undefined) updateData.description = data.description;
+    if (data.paymentMethod !== undefined) updateData.paymentMethod = data.paymentMethod;
+    if (data.notes !== undefined) updateData.notes = data.notes;
+    if (data.date !== undefined) updateData.date = data.date;
+
+    return prisma.expense.update({
+      where: { id },
+      data: updateData,
+    });
+  }
+
+  static async reverse(id: string, userId: string, reason: string) {
+    return prisma.expense.update({
+      where: { id },
+      data: {
+        isReversed: true,
+        reversalReason: reason,
+        reversedByUser: { connect: { id: userId } },
       },
     });
   }
@@ -20,6 +68,10 @@ export class ExpenseRepository {
         orderBy: { date: 'desc' },
         skip,
         take: limit,
+        include: {
+          user: { select: { name: true } },
+          reversedByUser: { select: { name: true } },
+        },
       }),
       prisma.expense.count({ where: { shopId } }),
     ]);
@@ -34,7 +86,7 @@ export class ExpenseRepository {
   }
 
   static async getSummaryByCategory(shopId: string, startDate?: Date, endDate?: Date) {
-    const where: Prisma.ExpenseWhereInput = { shopId };
+    const where: Prisma.ExpenseWhereInput = { shopId, isReversed: false };
 
     if (startDate || endDate) {
       where.date = {};

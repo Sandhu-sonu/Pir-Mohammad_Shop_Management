@@ -2,6 +2,7 @@ import { prisma } from '../prisma';
 import { ProductRepository, ProductFilterInput } from '../repositories/ProductRepository';
 import { CategoryBrandRepository } from '../repositories/CategoryBrandRepository';
 import { Prisma, TransactionType } from '@prisma/client';
+import { getBusinessProfile } from '../../lib/businessProfiles';
 
 export class ProductService {
   static async getProduct(id: string) {
@@ -30,6 +31,21 @@ export class ProductService {
     unit: string;
     minStock: number;
     supplierId?: string;
+
+    // Optional attributes (Phase 9)
+    manufacturer?: string;
+    modelNumber?: string;
+    batchNumber?: string;
+    expiryDate?: Date | string;
+    manufacturingDate?: Date | string;
+    warrantyMonths?: number;
+    serialNumber?: string;
+    imei?: string;
+    color?: string;
+    size?: string;
+    variant?: string;
+    hsnCode?: string;
+    gstRate?: number;
   }) {
     if (data.purchasePrice < 0 || data.sellingPrice < 0) {
       throw new Error('Prices cannot be negative');
@@ -59,6 +75,18 @@ export class ProductService {
     const categoryName = data.category && data.category.trim() ? data.category.trim() : 'General';
 
     return prisma.$transaction(async (tx) => {
+      // Validate business profile fields
+      const shop = await tx.shop.findUnique({ where: { id: data.shopId } });
+      if (!shop) throw new Error('Shop not found');
+      
+      const profile = getBusinessProfile(shop.businessType);
+      for (const field of profile.fields.filter(f => f.required && f.visible)) {
+        const val = (data as any)[field.name];
+        if (val === undefined || val === null || val === '') {
+          throw new Error(`${field.name.toUpperCase()} is required for business type: ${profile.displayName}`);
+        }
+      }
+
       // SKU Generation: shop-specific sequence starting with PRD-000001
       let finalSku = data.sku;
       if (!finalSku || !finalSku.trim()) {
@@ -125,6 +153,21 @@ export class ProductService {
           reorderLevel: new Prisma.Decimal(data.minStock.toString()),
           supplierId: data.supplierId || null,
           shopId: data.shopId,
+
+          // Optional attributes (Phase 9)
+          manufacturer: data.manufacturer || null,
+          modelNumber: data.modelNumber || null,
+          batchNumber: data.batchNumber || null,
+          expiryDate: data.expiryDate ? new Date(data.expiryDate) : null,
+          manufacturingDate: data.manufacturingDate ? new Date(data.manufacturingDate) : null,
+          warrantyMonths: data.warrantyMonths !== undefined ? Number(data.warrantyMonths) : null,
+          serialNumber: data.serialNumber || null,
+          imei: data.imei || null,
+          color: data.color || null,
+          size: data.size || null,
+          variant: data.variant || null,
+          hsnCode: data.hsnCode || null,
+          gstRate: data.gstRate !== undefined ? new Prisma.Decimal(data.gstRate.toString()) : null,
         },
       });
 
@@ -172,6 +215,21 @@ export class ProductService {
       unit: string;
       minStock: number;
       supplierId: string;
+
+      // Optional attributes (Phase 9)
+      manufacturer: string;
+      modelNumber: string;
+      batchNumber: string;
+      expiryDate: Date | string;
+      manufacturingDate: Date | string;
+      warrantyMonths: number;
+      serialNumber: string;
+      imei: string;
+      color: string;
+      size: string;
+      variant: string;
+      hsnCode: string;
+      gstRate: number;
     }>
   ) {
     return prisma.$transaction(async (tx) => {
@@ -180,6 +238,19 @@ export class ProductService {
       });
       if (!current || current.isDeleted) {
         throw new Error('Product not found');
+      }
+
+      // Validate business profile fields
+      const shop = await tx.shop.findUnique({ where: { id: current.shopId } });
+      if (!shop) throw new Error('Shop not found');
+      
+      const profile = getBusinessProfile(shop.businessType);
+      for (const field of profile.fields.filter(f => f.required && f.visible)) {
+        const key = field.name as keyof typeof data;
+        const val = data[key] !== undefined ? data[key] : (current as any)[field.name];
+        if (val === undefined || val === null || val === '') {
+          throw new Error(`${field.name.toUpperCase()} is required for business type: ${profile.displayName}`);
+        }
       }
 
       const updateData: Prisma.ProductUncheckedUpdateInput = {};
@@ -264,6 +335,21 @@ export class ProductService {
       if (data.supplierId !== undefined) {
         updateData.supplierId = data.supplierId || null;
       }
+
+      // Optional attributes (Phase 9)
+      if (data.manufacturer !== undefined) updateData.manufacturer = data.manufacturer || null;
+      if (data.modelNumber !== undefined) updateData.modelNumber = data.modelNumber || null;
+      if (data.batchNumber !== undefined) updateData.batchNumber = data.batchNumber || null;
+      if (data.expiryDate !== undefined) updateData.expiryDate = data.expiryDate ? new Date(data.expiryDate) : null;
+      if (data.manufacturingDate !== undefined) updateData.manufacturingDate = data.manufacturingDate ? new Date(data.manufacturingDate) : null;
+      if (data.warrantyMonths !== undefined) updateData.warrantyMonths = data.warrantyMonths !== undefined ? Number(data.warrantyMonths) : null;
+      if (data.serialNumber !== undefined) updateData.serialNumber = data.serialNumber || null;
+      if (data.imei !== undefined) updateData.imei = data.imei || null;
+      if (data.color !== undefined) updateData.color = data.color || null;
+      if (data.size !== undefined) updateData.size = data.size || null;
+      if (data.variant !== undefined) updateData.variant = data.variant || null;
+      if (data.hsnCode !== undefined) updateData.hsnCode = data.hsnCode || null;
+      if (data.gstRate !== undefined) updateData.gstRate = data.gstRate !== undefined ? new Prisma.Decimal(data.gstRate.toString()) : null;
 
       return tx.product.update({
         where: { id },

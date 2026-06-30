@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useTransition } from 'react';
+import React, { useState, useTransition, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -10,6 +10,9 @@ import { addCustomerAction, deleteCustomerAction } from '../../lib/actions/custo
 import { z } from 'zod';
 import { Search, Plus, UserCheck, Eye, Trash2, X } from 'lucide-react';
 import Link from 'next/link';
+import { useToastStore } from '../../lib/store/toast';
+import ConfirmDialog from '../../components/ui/ConfirmDialog';
+import { EmptyState } from '../../components/ui/EmptyState';
 
 type CustomerInputs = z.infer<typeof customerSchema>;
 
@@ -29,10 +32,24 @@ interface CustomersClientProps {
 
 export default function CustomersClient({ customersData, currentFilters }: CustomersClientProps) {
   const { t } = useTranslation();
+  const { showToast } = useToastStore();
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
   const [searchVal, setSearchVal] = useState(currentFilters.search);
+
+  // Debounced search trigger
+  useEffect(() => {
+    if (searchVal === currentFilters.search) return;
+
+    const delayDebounceFn = setTimeout(() => {
+      applyFilters(searchVal, 1);
+    }, 400);
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [searchVal]);
+
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const [isOpen, setIsOpen] = useState(false);
 
   const {
@@ -69,25 +86,23 @@ export default function CustomersClient({ customersData, currentFilters }: Custo
   const onCustomerSubmit = async (data: CustomerInputs) => {
     try {
       const res = await addCustomerAction(data);
+      if (res && 'error' in res) {
+        showToast(res.error || 'Error saving customer', 'error');
+        return;
+      }
       if (res.success) {
+        showToast('Customer saved ✓', 'success');
         setIsOpen(false);
         reset();
         router.refresh();
       }
     } catch (err: any) {
-      alert(err.message || 'Error saving customer');
+      showToast(err.message || 'Error saving customer', 'error');
     }
   };
 
-  const handleDeleteClick = async (id: string, name: string) => {
-    if (confirm(`Are you sure you want to delete ${name}?`)) {
-      try {
-        await deleteCustomerAction(id);
-        router.refresh();
-      } catch (err: any) {
-        alert(err.message || 'Error deleting customer');
-      }
-    }
+  const handleDeleteClick = (id: string, name: string) => {
+    setDeleteTarget({ id, name });
   };
 
   return (
@@ -137,8 +152,17 @@ export default function CustomersClient({ customersData, currentFilters }: Custo
                 </tr>
               ) : customersData.items.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="py-10 text-center text-slate-400 font-semibold">
-                    No customers found.
+                  <td colSpan={5} className="py-6 text-center">
+                    <EmptyState
+                      icon={UserCheck}
+                      title="ਕੋਈ ਗਾਹਕ ਨਹੀਂ ਮਿਲਿਆ (No Customers Found)"
+                      description="No Customers Registered Yet. Click 'Add Customer' to register your first customer."
+                      actionLabel="ਨਵਾਂ ਗਾਹਕ (Add Customer)"
+                      onAction={() => {
+                        reset();
+                        setIsOpen(true);
+                      }}
+                    />
                   </td>
                 </tr>
               ) : (
@@ -310,6 +334,32 @@ export default function CustomersClient({ customersData, currentFilters }: Custo
         </div>
       )}
 
+      {/* Confirm Customer Delete Dialog */}
+      <ConfirmDialog
+        isOpen={deleteTarget !== null}
+        title="ਗਾਹਕ ਨੂੰ ਮਿਟਾਓ? (Delete Customer?)"
+        message={`ਕੀ ਤੁਸੀਂ ਸੱਚਮੁੱਚ ਗਾਹਕ "${deleteTarget?.name}" ਨੂੰ ਸੂਚੀ ਵਿੱਚੋਂ ਹਟਾਉਣਾ ਚਾਹੁੰਦੇ ਹੋ? ਇਹ ਇਤਿਹਾਸਿਕ ਲੇਜਰਾਂ ਨੂੰ ਪ੍ਰਭਾਵਿਤ ਨਹੀਂ ਕਰੇਗਾ।`}
+        confirmLabel="ਮਿਟਾਓ (Delete)"
+        cancelLabel="ਰੱਦ ਕਰੋ (Cancel)"
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          try {
+            const res = await deleteCustomerAction(deleteTarget.id);
+            if (res && 'error' in res) {
+              showToast(res.error || 'Error deleting customer', 'error');
+              return;
+            }
+            showToast('Customer deleted ✓', 'success');
+            router.refresh();
+          } catch (err: any) {
+            showToast(err.message || 'Error deleting customer', 'error');
+          } finally {
+            setDeleteTarget(null);
+          }
+        }}
+        onClose={() => setDeleteTarget(null)}
+        isDestructive={true}
+      />
     </div>
   );
 }

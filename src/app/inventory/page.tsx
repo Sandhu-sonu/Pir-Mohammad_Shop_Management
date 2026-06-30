@@ -40,7 +40,7 @@ export default async function InventoryPage({ searchParams }: PageProps) {
   const suppliers = await SupplierRepository.findAll(user.shopId);
 
   return (
-    <Shell userName={user.name} shopName="Sher-E-Punjab Retail">
+    <Shell userName={user.name} shopName={user.shopName || 'Punjab Shop'}>
       <div className="space-y-6">
         <div>
           <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight">
@@ -61,6 +61,7 @@ export default async function InventoryPage({ searchParams }: PageProps) {
             lowStockOnly,
             page,
           }}
+          businessType={user.businessType}
         />
       </div>
     </Shell>

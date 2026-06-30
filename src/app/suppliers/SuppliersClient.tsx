@@ -4,6 +4,8 @@ import React, { useState } from 'react';
 import { useTranslation } from '../../hooks/useTranslation';
 import { createSupplierAction, paySupplierAction, getSupplierLedgerAction } from '../../lib/actions/suppliers';
 import { Plus, Search, IndianRupee, FileText, Check, Phone, Clipboard, ArrowDownRight, ArrowUpRight, X, RefreshCw } from 'lucide-react';
+import { useToastStore } from '../../lib/store/toast';
+import { EmptyState } from '../../components/ui/EmptyState';
 
 interface Supplier {
   id: string;
@@ -44,24 +46,20 @@ export default function SuppliersClient({ initialSuppliers }: SuppliersClientPro
   const [newGst, setNewGst] = useState<string>('');
   const [newOpeningBalance, setNewOpeningBalance] = useState<string>('0');
 
+  const { showToast } = useToastStore();
+
   const [activeSupplier, setActiveSupplier] = useState<Supplier | null>(null);
   const [payAmount, setPayAmount] = useState<string>('');
   const [payNote, setPayNote] = useState<string>('');
 
   const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
-  const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
-
-  const showMsg = (text: string, type: 'success' | 'error') => {
-    setMessage({ text, type });
-    setTimeout(() => setMessage(null), 5000);
-  };
 
   // Calculations
   const filteredSuppliers = suppliers.filter((s) =>
-    s.name.toLowerCase().includes(search.toLowerCase()) ||
-    (s.mobile && s.mobile.includes(search)) ||
-    (s.gst && s.gst.toLowerCase().includes(search.toLowerCase()))
+    (s && s.name && s.name.toLowerCase().includes(search.toLowerCase())) ||
+    (s && s.mobile && s.mobile.includes(search)) ||
+    (s && s.gst && s.gst.toLowerCase().includes(search.toLowerCase()))
   );
 
   const totalDues = suppliers.reduce((sum, s) => sum + Number(s.currentBalance), 0);
@@ -79,6 +77,11 @@ export default function SuppliersClient({ initialSuppliers }: SuppliersClientPro
         currentBalance: parseFloat(newOpeningBalance) || 0,
       });
 
+      if (res && 'success' in res && res.success === false) {
+        showToast(res.error || 'Error saving supplier', 'error');
+        return;
+      }
+
       setSuppliers((prev) => [res, ...prev]);
       setShowAddModal(false);
       setNewName('');
@@ -86,12 +89,12 @@ export default function SuppliersClient({ initialSuppliers }: SuppliersClientPro
       setNewGst('');
       setNewOpeningBalance('0');
 
-      showMsg(
-        language === 'en' ? 'Supplier added successfully' : 'ਸਪਲਾਇਰ ਸਫਲਤਾਪੂਰਵਕ ਜੋੜਿਆ ਗਿਆ',
+      showToast(
+        language === 'en' ? 'Supplier added successfully ✓' : 'ਸਪਲਾਇਰ ਸਫਲਤਾਪੂਰਵਕ ਜੋੜਿਆ ਗਿਆ ✓',
         'success'
       );
     } catch (err: any) {
-      showMsg(err.message, 'error');
+      showToast(err.message, 'error');
     } finally {
       setLoading(false);
     }
@@ -110,13 +113,18 @@ export default function SuppliersClient({ initialSuppliers }: SuppliersClientPro
 
     const amt = parseFloat(payAmount);
     if (isNaN(amt) || amt <= 0) {
-      showMsg(language === 'en' ? 'Enter a valid amount' : 'ਸਹੀ ਰਕਮ ਦਰਜ ਕਰੋ', 'error');
+      showToast(language === 'en' ? 'Enter a valid amount' : 'ਸਹੀ ਰਕਮ ਦਰਜ ਕਰੋ', 'error');
       return;
     }
 
     try {
       setLoading(true);
-      await paySupplierAction(activeSupplier.id, amt, payNote.trim() || undefined);
+      const res = await paySupplierAction(activeSupplier.id, amt, payNote.trim() || undefined);
+
+      if (res && 'success' in res && res.success === false) {
+        showToast(res.error || 'Error recording payment', 'error');
+        return;
+      }
 
       // Update local state
       setSuppliers((prev) =>
@@ -128,14 +136,14 @@ export default function SuppliersClient({ initialSuppliers }: SuppliersClientPro
       );
 
       setShowPayModal(false);
-      showMsg(
+      showToast(
         language === 'en'
-          ? 'Payment logged successfully'
-          : 'ਭੁਗਤਾਨ ਸਫਲਤਾਪੂਰਵਕ ਖਾਤੇ ਵਿੱਚ ਦਰਜ ਕਰ ਲਿਆ ਗਿਆ ਹੈ।',
+          ? 'Payment logged successfully ✓'
+          : 'ਭੁਗਤਾਨ ਸਫਲਤਾਪੂਰਵਕ ਖਾਤੇ ਵਿੱਚ ਦਰਜ ਕਰ ਲਿਆ ਗਿਆ ਹੈ ✓',
         'success'
       );
     } catch (err: any) {
-      showMsg(err.message, 'error');
+      showToast(err.message, 'error');
     } finally {
       setLoading(false);
     }
@@ -150,7 +158,7 @@ export default function SuppliersClient({ initialSuppliers }: SuppliersClientPro
       const res = await getSupplierLedgerAction(sup.id);
       setLedgerEntries(res);
     } catch (err: any) {
-      showMsg(err.message, 'error');
+      showToast(err.message, 'error');
     } finally {
       setLoading(false);
     }
@@ -198,29 +206,19 @@ export default function SuppliersClient({ initialSuppliers }: SuppliersClientPro
         </button>
       </div>
 
-      {message && (
-        <div
-          className={`p-4 rounded-lg flex items-center justify-between text-sm font-semibold transition-all ${
-            message.type === 'success'
-              ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-400'
-              : 'bg-rose-50 text-rose-800 dark:bg-rose-950/30 dark:text-rose-400'
-          }`}
-        >
-          <div className="flex items-center gap-2">
-            <Check className="w-5 h-5" />
-            <span>{message.text}</span>
-          </div>
-          <button onClick={() => setMessage(null)}>
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
-
       {/* SUPPLIERS TABLE */}
       <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
         {filteredSuppliers.length === 0 ? (
-          <div className="text-center py-12 text-slate-500">
-            {language === 'en' ? 'No suppliers found.' : 'ਕੋਈ ਸਪਲਾਇਰ ਨਹੀਂ ਲੱਭਿਆ।'}
+          <div className="py-6 text-center">
+            <EmptyState
+              icon={Clipboard}
+              title={language === 'en' ? 'No Suppliers Found' : 'ਕੋਈ ਸਪਲਾਇਰ ਨਹੀਂ ਲੱਭਿਆ।'}
+              description={language === 'en' ? 'No Wholesalers Registered Yet. Click Add Supplier to create your first supplier.' : 'ਕੋਈ ਹੋਲਸੇਲਰ ਰਜਿਸਟਰਡ ਨਹੀਂ ਹੈ। ਪਹਿਲਾ ਸਪਲਾਇਰ ਬਣਾਉਣ ਲਈ ਜੋੜੋ ਬਟਨ ਦਬਾਓ।'}
+              actionLabel={language === 'en' ? 'Add Supplier' : 'ਨਵਾਂ ਸਪਲਾਇਰ'}
+              onAction={() => {
+                setShowAddModal(true);
+              }}
+            />
           </div>
         ) : (
           <div className="overflow-x-auto">
