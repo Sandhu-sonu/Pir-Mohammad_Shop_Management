@@ -6,7 +6,7 @@ import { ProfitService } from '../src/db/services/ProfitService';
 import { CustomerRepository } from '../src/db/repositories/CustomerRepository';
 import { SupplierRepository } from '../src/db/repositories/SupplierRepository';
 import { SalesRepository } from '../src/db/repositories/SalesRepository';
-import { Prisma } from '@prisma/client';
+import { Prisma, DiscountType } from '@prisma/client';
 
 async function runPhase6Tests() {
   console.log('==================================================');
@@ -122,10 +122,12 @@ async function runPhase6Tests() {
     const sale = await SalesRepository.create({
       shopId: shop.id,
       userId: owner.id,
-      items: [{ productId: product.id, quantity: 10, sellingPrice: 150 }],
+      items: [{ productId: product.id, quantity: 10, sellingPrice: 150, originalPrice: 150, itemDiscount: 0, discountType: DiscountType.FIXED }],
       paidAmount: 1500,
       paymentMethod: 'CASH',
       discount: 0,
+      billDiscount: 0,
+      billDiscountType: DiscountType.FIXED,
     });
     console.log(`✔ Completed Cash Sale. Invoice: ${sale.invoiceNumber}, Total: ₹${sale.total}`);
 

@@ -182,20 +182,31 @@ enum PrinterType {
   A4
 }
 
+enum DiscountType {
+  FIXED
+  PERCENT
+}
+
 model Settings {
-  id               String        @id @default(uuid())
-  shopId           String        @unique
-  shop             Shop          @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  language         String        @default("pa") // "en" or "pa"
-  theme            String        @default("light") // "light" or "dark"
-  lowStockAlert    Boolean       @default(true)
-  receiptFormat    ReceiptFormat @default(SIMPLE)
-  printerType      PrinterType   @default(THERMAL_80)
-  receiptPrefix    String        @default("RCP-")
-  taxPrefix        String        @default("INV-")
-  currencySymbol   String        @default("₹")
-  decimalPrecision Int           @default(2)
-  dateFormat       String        @default("DD/MM/YYYY") // "DD/MM/YYYY" or "DD-MM-YYYY"
+  id                    String        @id @default(uuid())
+  shopId                String        @unique
+  shop                  Shop          @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  language              String        @default("pa") // "en" or "pa"
+  theme                 String        @default("light") // "light" or "dark"
+  lowStockAlert         Boolean       @default(true)
+  receiptFormat         ReceiptFormat @default(SIMPLE)
+  printerType           PrinterType   @default(THERMAL_80)
+  receiptPrefix         String        @default("RCP-")
+  taxPrefix             String        @default("INV-")
+  currencySymbol        String        @default("₹")
+  decimalPrecision      Int           @default(2)
+  dateFormat            String        @default("DD/MM/YYYY") // "DD/MM/YYYY" or "DD-MM-YYYY"
+  allowItemDiscount     Boolean       @default(true)
+  allowBillDiscount     Boolean       @default(true)
+  maxStaffDiscount      Decimal       @db.Decimal(5, 2) @default(10.00)
+  requireDiscountReason Boolean       @default(false)
+  reasonPercentLimit    Decimal       @db.Decimal(5, 2) @default(15.00)
+  reasonAmountLimit     Decimal       @db.Decimal(10, 2) @default(500.00)
 
   @@map("settings")
 }
@@ -349,6 +360,9 @@ model Sale {
   shop             Shop             @relation(fields: [shopId], references: [id], onDelete: Cascade)
   subTotal         Decimal          @db.Decimal(10, 2)
   discount         Decimal          @db.Decimal(10, 2) @default(0)
+  billDiscount     Decimal          @db.Decimal(10, 2) @default(0)
+  billDiscountType DiscountType     @default(FIXED)
+  discountReason   String?
   total            Decimal          @db.Decimal(10, 2)
   paymentMethod    PaymentMethod    @default(CASH)
   paidAmount       Decimal          @db.Decimal(10, 2)
@@ -378,15 +392,19 @@ model Sale {
 }
 
 model SaleItem {
-  id            String   @id @default(uuid())
+  id            String       @id @default(uuid())
   saleId        String
-  sale          Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  sale          Sale         @relation(fields: [saleId], references: [id], onDelete: Cascade)
   productId     String
-  product       Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
-  quantity      Decimal  @db.Decimal(10, 2)
-  purchasePrice Decimal  @db.Decimal(10, 2)
-  sellingPrice  Decimal  @db.Decimal(10, 2)
-  total         Decimal  @db.Decimal(10, 2)
+  product       Product      @relation(fields: [productId], references: [id], onDelete: Restrict)
+  quantity      Decimal      @db.Decimal(10, 2)
+  purchasePrice Decimal      @db.Decimal(10, 2)
+  sellingPrice  Decimal      @db.Decimal(10, 2)
+  originalPrice Decimal      @db.Decimal(10, 2) @default(0)
+  itemDiscount  Decimal      @db.Decimal(10, 2) @default(0)
+  discountType  DiscountType @default(FIXED)
+  discountReason String?
+  total         Decimal      @db.Decimal(10, 2)
 
   @@index([saleId])
   @@index([productId])

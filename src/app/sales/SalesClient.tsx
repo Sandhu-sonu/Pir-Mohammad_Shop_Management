@@ -20,6 +20,9 @@ import {
   X,
   ScanBarcode,
   ChevronDown,
+  Edit3,
+  Percent,
+  Coins,
 } from 'lucide-react';
 
 import { useToastStore } from '../../lib/store/toast';
@@ -36,15 +39,20 @@ interface SalesClientProps {
     limit: number;
   };
   shop: any;
+  role: string;
 }
 
 interface CartItem {
   product: any;
   quantity: number;
+  originalPrice: number;
   sellingPrice: number;
+  itemDiscount: number;
+  discountType: 'FIXED' | 'PERCENT';
+  discountReason?: string;
 }
 
-export default function SalesClient({ products, customers, salesData, shop }: SalesClientProps) {
+export default function SalesClient({ products, customers, salesData, shop, role }: SalesClientProps) {
   const { t, language } = useTranslation();
   const { showToast } = useToastStore();
   const router = useRouter();
@@ -61,6 +69,20 @@ export default function SalesClient({ products, customers, salesData, shop }: Sa
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(PaymentMethod.CASH);
   const [paidAmount, setPaidAmount] = useState('0');
   const [submitting, setSubmitting] = useState(false);
+  
+  // Discount Engine states
+  const [billDiscountType, setBillDiscountType] = useState<'FIXED' | 'PERCENT'>('FIXED');
+  const [activeDiscountItem, setActiveDiscountItem] = useState<string | null>(null);
+  const [rowDiscountVal, setRowDiscountVal] = useState<string>('0');
+  const [rowDiscountType, setRowDiscountType] = useState<'FIXED' | 'PERCENT'>('FIXED');
+  
+  const [editingPriceProductId, setEditingPriceProductId] = useState<string | null>(null);
+  const [tempPriceVal, setTempPriceVal] = useState<string>('');
+
+  const [showReasonModal, setShowReasonModal] = useState(false);
+  const [reasonSelected, setReasonSelected] = useState('Regular Customer');
+  const [customReason, setCustomReason] = useState('');
+  const [autoPrintAfterReason, setAutoPrintAfterReason] = useState(false);
 
   // Invoice History State
   const [invoices, setInvoices] = useState<any[]>(salesData.items);
@@ -85,8 +107,16 @@ export default function SalesClient({ products, customers, salesData, shop }: Sa
   };
 
   // Automatically update paidAmount when cart or payment method changes
-  const subTotal = cart.reduce((sum, item) => sum + item.quantity * item.sellingPrice, 0);
-  const total = Math.max(0, subTotal - parseFloat(discount || '0'));
+  const rawSubTotal = cart.reduce((sum, item) => sum + item.quantity * item.originalPrice, 0);
+  const totalItemDiscount = cart.reduce((sum, item) => sum + item.quantity * (item.originalPrice - item.sellingPrice), 0);
+  const afterItemDiscountSubtotal = rawSubTotal - totalItemDiscount;
+
+  const billDiscountVal = parseFloat(discount || '0');
+  const billDiscountAmt = billDiscountType === 'PERCENT'
+    ? afterItemDiscountSubtotal * (billDiscountVal / 100)
+    : billDiscountVal;
+
+  const total = Math.max(0, afterItemDiscountSubtotal - billDiscountAmt);
   
   useEffect(() => {
     if (paymentMethod === PaymentMethod.CREDIT) {
@@ -251,7 +281,18 @@ export default function SalesClient({ products, customers, salesData, shop }: Sa
         showToast(`Insufficient stock for ${product.nameEn}. Available: 0`, 'warning');
         return;
       }
-      setCart([...cart, { product, quantity: 1, sellingPrice: Number(product.sellingPrice) }]);
+      setCart([
+        ...cart,
+        {
+          product,
+          quantity: 1,
+          originalPrice: Number(product.sellingPrice),
+          sellingPrice: Number(product.sellingPrice),
+          itemDiscount: 0,
+          discountType: 'FIXED',
+          discountReason: undefined
+        }
+      ]);
     }
   };
 
@@ -277,19 +318,158 @@ export default function SalesClient({ products, customers, salesData, shop }: Sa
     setCart(cart.filter((item) => item.product.id !== productId));
   };
 
+  const applyRowDiscount = (productId: string, val: number, type: 'FIXED' | 'PERCENT') => {
+    setCart(
+      cart.map((item) => {
+        if (item.product.id === productId) {
+          let derivedPrice = item.originalPrice;
+          if (type === 'PERCENT') {
+            derivedPrice = item.originalPrice * (1 - val / 100);
+          } else {
+            derivedPrice = item.originalPrice - val;
+          }
+          return {
+            ...item,
+            itemDiscount: val,
+            discountType: type,
+            sellingPrice: Math.max(0, parseFloat(derivedPrice.toFixed(2))),
+          };
+        }
+        return item;
+      })
+    );
+  };
+
+  const editSellingPrice = (productId: string, newPrice: number) => {
+    setCart(
+      cart.map((item) => {
+        if (item.product.id === productId) {
+          const discountDiff = item.originalPrice - newPrice;
+          return {
+            ...item,
+            itemDiscount: parseFloat(discountDiff.toFixed(2)),
+            discountType: 'FIXED',
+            sellingPrice: Math.max(0, newPrice),
+          };
+        }
+        return item;
+      })
+    );
+  };
+
   const handleCheckout = async (autoPrint = false) => {
+    validateAndProceedCheckout(autoPrint);
+  };
+
+  const validateAndProceedCheckout = (autoPrint = false) => {
     if (cart.length === 0) {
       showToast('Your cart is empty.', 'warning');
       return;
     }
 
-    const discNum = parseFloat(discount || '0');
-    const paidNum = parseFloat(paidAmount || '0');
+    const allowItemDiscount = shop.settings?.allowItemDiscount ?? true;
+    const allowBillDiscount = shop.settings?.allowBillDiscount ?? true;
+    const maxStaffDiscount = shop.settings?.maxStaffDiscount !== undefined ? Number(shop.settings.maxStaffDiscount) : 10;
+    const requireDiscountReason = shop.settings?.requireDiscountReason ?? false;
+    const reasonPercentLimit = shop.settings?.reasonPercentLimit !== undefined ? Number(shop.settings.reasonPercentLimit) : 15;
+    const reasonAmountLimit = shop.settings?.reasonAmountLimit !== undefined ? Number(shop.settings.reasonAmountLimit) : 500;
+
+    // Check if item discounts are allowed
+    if (!allowItemDiscount && cart.some(item => item.itemDiscount > 0)) {
+      showToast('Item-wise discounts are disabled in settings.', 'error');
+      return;
+    }
+
+    // Check if bill discount is allowed
+    const billDiscountVal = parseFloat(discount || '0');
+    if (!allowBillDiscount && billDiscountVal > 0) {
+      showToast('Bill-wise discounts are disabled in settings.', 'error');
+      return;
+    }
 
     if (paymentMethod === PaymentMethod.CREDIT && !selectedCustomerId) {
       showToast(t('selectCustomer') + ' (Required for credit sale)', 'warning');
       return;
     }
+
+    // Check for negative selling prices or discounts exceeding price
+    for (const item of cart) {
+      if (item.sellingPrice < 0) {
+        showToast(`Selling price cannot be negative for product: ${item.product.namePa || item.product.nameEn}`, 'error');
+        return;
+      }
+      if (item.originalPrice < item.sellingPrice) {
+        showToast(`Selling price cannot exceed original price for product: ${item.product.namePa || item.product.nameEn}`, 'error');
+        return;
+      }
+      const discountPercent = item.originalPrice > 0 ? ((item.originalPrice - item.sellingPrice) / item.originalPrice) * 100 : 0;
+      
+      // Staff limit checks
+      if (role === 'STAFF' && discountPercent > maxStaffDiscount) {
+        showToast(`Staff members cannot give discounts higher than ${maxStaffDiscount}% on item: ${item.product.namePa || item.product.nameEn}`, 'error');
+        return;
+      }
+    }
+
+    // Calculate subtotal of lines
+    let subtotal = 0;
+    let totalItemDiscount = 0;
+    cart.forEach(item => {
+      subtotal += item.quantity * item.sellingPrice;
+      totalItemDiscount += item.quantity * (item.originalPrice - item.sellingPrice);
+    });
+
+    // Check bill discount Staff limit
+    let billDiscountAmt = 0;
+    if (billDiscountType === 'PERCENT') {
+      if (role === 'STAFF' && billDiscountVal > maxStaffDiscount) {
+        showToast(`Staff members cannot give bill discounts higher than ${maxStaffDiscount}%`, 'error');
+        return;
+      }
+      billDiscountAmt = subtotal * (billDiscountVal / 100);
+    } else {
+      const billDiscountPercent = subtotal > 0 ? (billDiscountVal / subtotal) * 100 : 0;
+      if (role === 'STAFF' && billDiscountPercent > maxStaffDiscount) {
+        showToast(`Staff members cannot give bill discounts higher than ${maxStaffDiscount}%`, 'error');
+        return;
+      }
+      billDiscountAmt = billDiscountVal;
+    }
+
+    const totalDiscountAmt = totalItemDiscount + billDiscountAmt;
+    const finalTotal = subtotal - billDiscountAmt;
+
+    if (finalTotal < 0) {
+      showToast('Grand total cannot be negative.', 'error');
+      return;
+    }
+
+    // Check if large discount reason is required
+    let thresholdExceeded = false;
+    if (requireDiscountReason) {
+      for (const item of cart) {
+        const itemDiscountPercent = item.originalPrice > 0 ? ((item.originalPrice - item.sellingPrice) / item.originalPrice) * 100 : 0;
+        if (itemDiscountPercent > reasonPercentLimit) {
+          thresholdExceeded = true;
+          break;
+        }
+      }
+      if (totalDiscountAmt > reasonAmountLimit) {
+        thresholdExceeded = true;
+      }
+    }
+
+    if (thresholdExceeded) {
+      setAutoPrintAfterReason(autoPrint);
+      setShowReasonModal(true);
+    } else {
+      executeCheckout(autoPrint);
+    }
+  };
+
+  const executeCheckout = async (autoPrint = false, reasonText?: string) => {
+    const billDiscountVal = parseFloat(discount || '0');
+    const paidNum = parseFloat(paidAmount || '0');
 
     setSubmitting(true);
     try {
@@ -299,10 +479,17 @@ export default function SalesClient({ products, customers, salesData, shop }: Sa
           productId: item.product.id,
           quantity: item.quantity,
           sellingPrice: item.sellingPrice,
+          originalPrice: item.originalPrice,
+          itemDiscount: item.itemDiscount,
+          discountType: item.discountType,
+          discountReason: reasonText || undefined,
         })),
-        discount: discNum,
+        discount: 0,
         paymentMethod,
         paidAmount: paidNum,
+        billDiscount: billDiscountVal,
+        billDiscountType: billDiscountType,
+        discountReason: reasonText || undefined,
       });
 
       if (res.success && 'sale' in res) {
@@ -311,6 +498,7 @@ export default function SalesClient({ products, customers, salesData, shop }: Sa
         setCart([]);
         setDiscount('0');
         setSelectedCustomerId('');
+        setBillDiscountType('FIXED');
         localStorage.removeItem('draft_sales_pos');
         
         // Refresh invoices list
@@ -323,14 +511,17 @@ export default function SalesClient({ products, customers, salesData, shop }: Sa
             window.print();
           }, 500);
         } else {
-          // Return focus to barcode
           setTimeout(() => {
             barcodeInputRef.current?.focus();
           }, 200);
         }
+      } else {
+        const errMsg = 'error' in res ? res.error : 'Checkout failed';
+        showToast(errMsg, 'error');
       }
     } catch (err: any) {
-      showToast(err.message || 'Error processing transaction', 'error');
+      console.error(err);
+      showToast(err.message || 'Checkout failed', 'error');
     } finally {
       setSubmitting(false);
     }
@@ -439,54 +630,214 @@ export default function SalesClient({ products, customers, salesData, shop }: Sa
                   <p className="font-bold">ਬਿੱਲ ਬਣਾਉਣ ਲਈ ਖੱਬੇ ਪਾਸਿਓਂ ਆਈਟਮਾਂ ਚੁਣੋ (Cart is empty)</p>
                 </div>
               ) : (
-                cart.map((item) => (
-                  <div
-                    key={item.product.id}
-                    className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-850 rounded-xl"
-                  >
-                    <div className="min-w-0 pr-3">
-                      <p className="text-sm font-bold truncate">
-                        {language === 'pa' ? item.product.namePa : item.product.nameEn}
-                      </p>
-                      <p className="text-xs text-slate-550 dark:text-slate-400 mt-0.5">
-                        {formatPrice(item.sellingPrice)} / {item.product.unit}
-                      </p>
-                    </div>
-                    
-                    <div className="flex items-center gap-3 shrink-0">
-                      {/* Quantity Controls */}
-                      <div className="flex items-center border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 rounded-lg overflow-hidden">
+                cart.map((item) => {
+                  const lineTotal = item.quantity * item.sellingPrice;
+                  const itemDiscountVal = item.originalPrice - item.sellingPrice;
+
+                  return (
+                    <div
+                      key={item.product.id}
+                      className="flex flex-col sm:flex-row sm:items-center justify-between p-3.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-850 rounded-xl gap-3"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-bold truncate text-slate-800 dark:text-slate-100">
+                          {language === 'pa' ? item.product.namePa : item.product.nameEn}
+                        </p>
+                        
+                        <div className="flex items-center gap-2 mt-1">
+                          {editingPriceProductId === item.product.id ? (
+                            <div className="flex items-center gap-1">
+                              <span className="text-xs font-bold text-slate-400">₹</span>
+                              <input
+                                type="number"
+                                value={tempPriceVal}
+                                onChange={(e) => setTempPriceVal(e.target.value)}
+                                onBlur={() => {
+                                  const parsed = parseFloat(tempPriceVal);
+                                  if (!isNaN(parsed) && parsed >= 0) {
+                                    editSellingPrice(item.product.id, parsed);
+                                  }
+                                  setEditingPriceProductId(null);
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    const parsed = parseFloat(tempPriceVal);
+                                    if (!isNaN(parsed) && parsed >= 0) {
+                                      editSellingPrice(item.product.id, parsed);
+                                    }
+                                    setEditingPriceProductId(null);
+                                  }
+                                }}
+                                className="w-16 px-1.5 py-0.5 border border-slate-350 dark:border-slate-700 bg-white dark:bg-slate-900 rounded text-xs font-extrabold text-slate-900 dark:text-slate-100"
+                                autoFocus
+                              />
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1 bg-white dark:bg-slate-900 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-800">
+                              <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                                {formatPrice(item.sellingPrice)} / {item.product.unit}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingPriceProductId(item.product.id);
+                                  setTempPriceVal(item.sellingPrice.toString());
+                                }}
+                                className="p-0.5 text-slate-400 hover:text-slate-650 rounded"
+                                title="Edit Price directly"
+                              >
+                                <Edit3 className="w-3 h-3" />
+                              </button>
+                            </div>
+                          )}
+
+                          {itemDiscountVal > 0 && (
+                            <span className="text-[10px] bg-amber-50 dark:bg-amber-950/20 text-amber-700 dark:text-amber-400 px-1.5 py-0.5 rounded font-bold">
+                              Disc: -{formatPrice(itemDiscountVal)} (Orig: {formatPrice(item.originalPrice)})
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      
+                      <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0">
+                        {/* Quantity Controls */}
+                        <div className="flex items-center border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 rounded-lg overflow-hidden">
+                          <button
+                            type="button"
+                            onClick={() => updateQuantity(item.product.id, -1)}
+                            className="px-2.5 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-800"
+                          >
+                            <Minus className="w-4.5 h-4.5" />
+                          </button>
+                          <span className="px-3.5 font-extrabold text-sm">{item.quantity}</span>
+                          <button
+                            type="button"
+                            onClick={() => updateQuantity(item.product.id, 1)}
+                            className="px-2.5 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-800"
+                          >
+                            <Plus className="w-4.5 h-4.5" />
+                          </button>
+                        </div>
+
+                        {/* Discount Button & Popover */}
+                        {(shop.settings?.allowItemDiscount ?? true) && (
+                          <div className="relative">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (activeDiscountItem === item.product.id) {
+                                  setActiveDiscountItem(null);
+                                } else {
+                                  setActiveDiscountItem(item.product.id);
+                                  setRowDiscountVal(item.itemDiscount.toString());
+                                  setRowDiscountType(item.discountType);
+                                }
+                              }}
+                              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all border ${
+                                item.itemDiscount > 0
+                                  ? 'bg-amber-50 dark:bg-amber-950/20 text-amber-700 border-amber-200 dark:border-amber-900 font-extrabold'
+                                  : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-350 border-slate-200 dark:border-slate-800'
+                              }`}
+                            >
+                              <Coins className="w-3.5 h-3.5" />
+                              <span>
+                                {item.itemDiscount > 0
+                                  ? `${item.discountType === 'PERCENT' ? `${item.itemDiscount}%` : `₹${item.itemDiscount}`}`
+                                  : 'ਡਿਸਕਾਊਂਟ (Disc)'}
+                              </span>
+                            </button>
+
+                            {activeDiscountItem === item.product.id && (
+                              <div className="absolute right-0 mt-2 p-3 bg-white dark:bg-slate-900 border border-slate-250 dark:border-slate-800 rounded-xl shadow-xl z-50 w-52 space-y-3">
+                                <div className="flex justify-between items-center">
+                                  <span className="text-xs font-bold text-slate-500">ਡਿਸਕਾਊਂਟ:</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setActiveDiscountItem(null)}
+                                    className="p-0.5 text-slate-400 hover:text-slate-600"
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                                
+                                <div className="flex border border-slate-200 dark:border-slate-800 rounded-lg overflow-hidden text-[10px] font-bold">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      applyRowDiscount(item.product.id, 0, 'FIXED');
+                                      setActiveDiscountItem(null);
+                                    }}
+                                    className="flex-1 py-1.5 px-1 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-650 text-center"
+                                  >
+                                    No Disc
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setRowDiscountType('FIXED')}
+                                    className={`flex-1 py-1.5 text-center ${
+                                      rowDiscountType === 'FIXED'
+                                        ? 'bg-blue-600 text-white'
+                                        : 'bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
+                                    }`}
+                                  >
+                                    ₹ Fixed
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setRowDiscountType('PERCENT')}
+                                    className={`flex-1 py-1.5 text-center ${
+                                      rowDiscountType === 'PERCENT'
+                                        ? 'bg-blue-600 text-white'
+                                        : 'bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
+                                    }`}
+                                  >
+                                    % Pct
+                                  </button>
+                                </div>
+
+                                <div className="flex gap-1.5 items-center">
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    value={rowDiscountVal}
+                                    onChange={(e) => setRowDiscountVal(e.target.value)}
+                                    className="w-full px-2 py-1 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-xs font-bold text-slate-900 dark:text-slate-100"
+                                    placeholder="Value"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const val = parseFloat(rowDiscountVal) || 0;
+                                      applyRowDiscount(item.product.id, val, rowDiscountType);
+                                      setActiveDiscountItem(null);
+                                    }}
+                                    className="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold"
+                                  >
+                                    Apply
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Final Line Total */}
+                        <div className="w-20 text-right font-extrabold text-sm text-slate-800 dark:text-slate-100">
+                          {formatPrice(lineTotal)}
+                        </div>
+
                         <button
                           type="button"
-                          onClick={() => updateQuantity(item.product.id, -1)}
-                          className="px-2.5 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-800"
+                          onClick={() => removeFromCart(item.product.id)}
+                          className="p-1.5 text-rose-600 hover:bg-red-50 dark:hover:bg-red-950/20 rounded-lg"
                         >
-                          <Minus className="w-4 h-4" />
-                        </button>
-                        <span className="px-3.5 font-extrabold text-sm">{item.quantity}</span>
-                        <button
-                          type="button"
-                          onClick={() => updateQuantity(item.product.id, 1)}
-                          className="px-2.5 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-800"
-                        >
-                          <Plus className="w-4 h-4" />
+                          <Trash2 className="w-4.5 h-4.5" />
                         </button>
                       </div>
-
-                      <div className="w-20 text-right font-extrabold text-sm">
-                        {formatPrice(item.quantity * item.sellingPrice)}
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => removeFromCart(item.product.id)}
-                        className="p-1.5 text-rose-600 hover:bg-red-50 dark:hover:bg-red-950/20 rounded"
-                      >
-                        <Trash2 className="w-4.5 h-4.5" />
-                      </button>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
 
@@ -494,20 +845,41 @@ export default function SalesClient({ products, customers, salesData, shop }: Sa
             <div className="border-t border-slate-200 dark:border-slate-800 pt-4 space-y-4 bg-slate-50 dark:bg-slate-950 -mx-5 -mb-5 p-5 rounded-b-2xl">
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm font-semibold">
                 <div>
-                  <span className="text-slate-450 block">{t('subTotal')}:</span>
-                  <span className="text-md font-bold">{formatPrice(subTotal)}</span>
+                  <span className="text-slate-450 block">ਸਬ-ਟੋਟਲ (Subtotal):</span>
+                  <span className="text-md font-bold text-slate-800 dark:text-slate-200">{formatPrice(rawSubTotal)}</span>
                 </div>
+                
                 <div>
-                  <span className="text-slate-450 block">{t('discount')}:</span>
-                  <input
-                    type="number"
-                    value={discount}
-                    onChange={(e) => setDiscount(e.target.value)}
-                    className="w-full mt-1 px-3 py-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-850 rounded font-bold"
-                  />
+                  <span className="text-slate-450 block">ਆਈਟਮ ਡਿਸਕਾਊਂਟ (Item Disc):</span>
+                  <span className="text-md font-bold text-amber-600">-{formatPrice(totalItemDiscount)}</span>
                 </div>
+
                 <div>
-                  <span className="text-slate-450 block">Payment:</span>
+                  <span className="text-slate-450 block">ਬਿੱਲ ਡਿਸਕਾਊਂਟ (Bill Disc):</span>
+                  {(shop.settings?.allowBillDiscount ?? true) ? (
+                    <div className="flex items-center mt-1 border border-slate-300 dark:border-slate-800 rounded bg-white dark:bg-slate-900 overflow-hidden">
+                      <input
+                        type="number"
+                        value={discount}
+                        onChange={(e) => setDiscount(e.target.value)}
+                        className="w-full px-2 py-0.5 bg-transparent border-0 font-bold focus:ring-0 text-xs text-slate-900 dark:text-slate-100"
+                        style={{ outline: 'none' }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setBillDiscountType(billDiscountType === 'FIXED' ? 'PERCENT' : 'FIXED')}
+                        className="px-2 py-1 bg-slate-100 hover:bg-slate-250 dark:bg-slate-800 dark:hover:bg-slate-700 text-[10px] font-extrabold border-l border-slate-200 dark:border-slate-700"
+                      >
+                        {billDiscountType === 'FIXED' ? '₹' : '%'}
+                      </button>
+                    </div>
+                  ) : (
+                    <span className="text-slate-400 block text-xs py-1">Disabled</span>
+                  )}
+                </div>
+
+                <div>
+                  <span className="text-slate-450 block">ਭੁਗਤਾਨ (Payment):</span>
                   <select
                     value={paymentMethod}
                     onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}
@@ -518,6 +890,9 @@ export default function SalesClient({ products, customers, salesData, shop }: Sa
                     <option value={PaymentMethod.CREDIT}>{t('credit')}</option>
                   </select>
                 </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 text-sm font-semibold">
                 <div>
                   <span className="text-slate-450 block">{t('paidAmount')}:</span>
                   <input
@@ -525,7 +900,7 @@ export default function SalesClient({ products, customers, salesData, shop }: Sa
                     disabled={paymentMethod === PaymentMethod.CREDIT}
                     value={paidAmount}
                     onChange={(e) => setPaidAmount(e.target.value)}
-                    className="w-full mt-1 px-3 py-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-850 rounded font-bold disabled:opacity-50"
+                    className="w-full mt-1 px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-850 rounded font-bold disabled:opacity-50 text-slate-950 dark:text-slate-50"
                   />
                 </div>
               </div>
@@ -851,21 +1226,30 @@ export default function SalesClient({ products, customers, salesData, shop }: Sa
                       </thead>
                       <tbody className="divide-y">
                         {selectedInvoiceForPrint.items?.map((item: any, idx: number) => {
-                          const baseAmount = Number(item.quantity) * Number(item.sellingPrice);
+                          const originalPrice = Number(item.originalPrice || item.sellingPrice);
+                          const quantity = Number(item.quantity);
+                          const itemDiscount = Number(item.itemDiscount || 0);
+                          const lineTotal = quantity * Number(item.sellingPrice);
+                          
                           return (
                             <tr key={item.id} className="hover:bg-slate-50">
                               <td className="py-2 px-3 border text-center">{idx + 1}</td>
                               <td className="py-2 px-3 border">
                                 <div className="font-semibold text-slate-900">{item.product?.namePa}</div>
                                 <div className="text-[10px] text-slate-500">{item.product?.nameEn}</div>
+                                {itemDiscount > 0 && (
+                                  <div className="text-[10px] text-amber-600 font-bold">
+                                    Discount: -{formatPrice(itemDiscount)} {item.discountType === 'PERCENT' ? `(${item.itemDiscount}%)` : ''}
+                                  </div>
+                                )}
                               </td>
                               {showGST && <td className="py-2 px-3 border text-center">{item.product?.hsn || '-'}</td>}
                               <td className="py-2 px-3 border text-center">
-                                {Number(item.quantity)} {item.product?.unit}
+                                {quantity} {item.product?.unit}
                               </td>
-                              <td className="py-2 px-3 border text-right">{formatPrice(Number(item.sellingPrice))}</td>
+                              <td className="py-2 px-3 border text-right">{formatPrice(originalPrice)}</td>
                               {showGST && <td className="py-2 px-3 border text-center">{item.product?.gstRate ? `${item.product.gstRate}%` : '0%'}</td>}
-                              <td className="py-2 px-3 border text-right font-semibold">{formatPrice(baseAmount)}</td>
+                              <td className="py-2 px-3 border text-right font-semibold">{formatPrice(lineTotal)}</td>
                             </tr>
                           );
                         })}
@@ -883,16 +1267,44 @@ export default function SalesClient({ products, customers, salesData, shop }: Sa
                         )}
                       </div>
                       <div className="space-y-1.5 text-right max-w-sm ml-auto w-full">
-                        <div className="flex justify-between text-xs text-slate-600">
-                          <span>Subtotal:</span>
-                          <span>{formatPrice(Number(selectedInvoiceForPrint.subTotal))}</span>
-                        </div>
-                        {Number(selectedInvoiceForPrint.discount) > 0 && (
-                          <div className="flex justify-between text-xs text-rose-600">
-                            <span>Discount:</span>
-                            <span>- {formatPrice(Number(selectedInvoiceForPrint.discount))}</span>
-                          </div>
-                        )}
+                        {(() => {
+                          const rawSubTotal = selectedInvoiceForPrint.items?.reduce((sum: number, item: any) => sum + Number(item.quantity) * Number(item.originalPrice || item.sellingPrice), 0) || 0;
+                          const itemDiscountTotal = selectedInvoiceForPrint.items?.reduce((sum: number, item: any) => sum + Number(item.quantity) * (Number(item.originalPrice || item.sellingPrice) - Number(item.sellingPrice)), 0) || 0;
+                          const billDiscountAmt = Number(selectedInvoiceForPrint.billDiscount || 0);
+                          const totalDiscount = itemDiscountTotal + billDiscountAmt;
+                          
+                          return (
+                            <>
+                              <div className="flex justify-between text-xs text-slate-600">
+                                <span>Subtotal:</span>
+                                <span>{formatPrice(rawSubTotal)}</span>
+                              </div>
+                              {itemDiscountTotal > 0 && (
+                                <div className="flex justify-between text-xs text-amber-600">
+                                  <span>Item Discount:</span>
+                                  <span>- {formatPrice(itemDiscountTotal)}</span>
+                                </div>
+                              )}
+                              {billDiscountAmt > 0 && (
+                                <div className="flex justify-between text-xs text-rose-600">
+                                  <span>Bill Discount:</span>
+                                  <span>- {formatPrice(billDiscountAmt)}</span>
+                                </div>
+                              )}
+                              {totalDiscount > 0 && (
+                                <div className="flex justify-between text-xs text-emerald-600 font-bold border-t border-dashed pt-1">
+                                  <span>Total Discount Given:</span>
+                                  <span>{formatPrice(totalDiscount)}</span>
+                                </div>
+                              )}
+                              {selectedInvoiceForPrint.discountReason && (
+                                <div className="text-[10px] text-slate-500 italic text-right">
+                                  Reason: {selectedInvoiceForPrint.discountReason}
+                                </div>
+                              )}
+                            </>
+                          );
+                        })()}
                         
                         {/* GST breakdown summary if enabled */}
                         {showGST && (
@@ -974,20 +1386,29 @@ export default function SalesClient({ products, customers, salesData, shop }: Sa
                       </thead>
                       <tbody className="divide-y divide-slate-100">
                         {selectedInvoiceForPrint.items?.map((item: any) => {
-                          const itemAmount = Number(item.quantity) * Number(item.sellingPrice);
+                          const originalPrice = Number(item.originalPrice || item.sellingPrice);
+                          const quantity = Number(item.quantity);
+                          const itemDiscount = Number(item.itemDiscount || 0);
+                          const lineTotal = quantity * Number(item.sellingPrice);
+                          
                           return (
                             <tr key={item.id}>
                               <td className="py-1.5 pr-1">
                                 <div className="font-bold">{item.product?.namePa}</div>
                                 <div className="text-[9px] text-slate-500">{item.product?.nameEn}</div>
+                                {itemDiscount > 0 && (
+                                  <div className="text-[9px] text-amber-600 font-bold">
+                                    Disc: -{formatPrice(itemDiscount)} {item.discountType === 'PERCENT' ? `(${item.itemDiscount}%)` : ''}
+                                  </div>
+                                )}
                               </td>
                               {showGST && <td className="py-1.5 text-center">{item.product?.hsn || '-'}</td>}
                               <td className="py-1.5 text-center">
-                                {Number(item.quantity)} {item.product?.unit}
+                                {quantity} {item.product?.unit}
                               </td>
-                              <td className="py-1.5 text-right">{formatPrice(Number(item.sellingPrice))}</td>
+                              <td className="py-1.5 text-right">{formatPrice(originalPrice)}</td>
                               {showGST && <td className="py-1.5 text-center">{item.product?.gstRate ? `${item.product.gstRate}%` : '0%'}</td>}
-                              <td className="py-1.5 text-right font-bold">{formatPrice(itemAmount)}</td>
+                              <td className="py-1.5 text-right font-bold">{formatPrice(lineTotal)}</td>
                             </tr>
                           );
                         })}
@@ -1004,12 +1425,44 @@ export default function SalesClient({ products, customers, salesData, shop }: Sa
                         <span>Total Quantity:</span>
                         <span>{selectedInvoiceForPrint.items?.reduce((sum: number, i: any) => sum + Number(i.quantity), 0) || 0}</span>
                       </div>
-                      {Number(selectedInvoiceForPrint.discount) > 0 && (
-                        <div className="flex justify-between text-rose-600">
-                          <span>Discount:</span>
-                          <span>- {formatPrice(Number(selectedInvoiceForPrint.discount))}</span>
-                        </div>
-                      )}
+                      {(() => {
+                        const rawSubTotal = selectedInvoiceForPrint.items?.reduce((sum: number, item: any) => sum + Number(item.quantity) * Number(item.originalPrice || item.sellingPrice), 0) || 0;
+                        const itemDiscountTotal = selectedInvoiceForPrint.items?.reduce((sum: number, item: any) => sum + Number(item.quantity) * (Number(item.originalPrice || item.sellingPrice) - Number(item.sellingPrice)), 0) || 0;
+                        const billDiscountAmt = Number(selectedInvoiceForPrint.billDiscount || 0);
+                        const totalDiscount = itemDiscountTotal + billDiscountAmt;
+                        
+                        return (
+                          <>
+                            <div className="flex justify-between">
+                              <span>Subtotal:</span>
+                              <span>{formatPrice(rawSubTotal)}</span>
+                            </div>
+                            {itemDiscountTotal > 0 && (
+                              <div className="flex justify-between text-amber-600">
+                                <span>Item Discount:</span>
+                                <span>- {formatPrice(itemDiscountTotal)}</span>
+                              </div>
+                            )}
+                            {billDiscountAmt > 0 && (
+                              <div className="flex justify-between text-rose-600">
+                                <span>Bill Discount:</span>
+                                <span>- {formatPrice(billDiscountAmt)}</span>
+                              </div>
+                            )}
+                            {totalDiscount > 0 && (
+                              <div className="flex justify-between text-emerald-600 font-bold border-t border-dashed pt-0.5">
+                                <span>Total Discount:</span>
+                                <span>{formatPrice(totalDiscount)}</span>
+                              </div>
+                            )}
+                            {selectedInvoiceForPrint.discountReason && (
+                              <div className="text-[9px] text-slate-500 italic text-right">
+                                Reason: {selectedInvoiceForPrint.discountReason}
+                              </div>
+                            )}
+                          </>
+                        );
+                      })()}
                       
                       {/* GST breakdown table */}
                       {showGST && (
@@ -1136,6 +1589,89 @@ export default function SalesClient({ products, customers, salesData, shop }: Sa
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Discount Reason Required Modal */}
+      {showReasonModal && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 no-print">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-md shadow-xl overflow-hidden p-6 relative">
+            <button
+              onClick={() => setShowReasonModal(false)}
+              className="absolute top-4 right-4 p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-650 dark:text-slate-500 dark:hover:text-slate-300 transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+            
+            <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 border-b pb-2 mb-4">
+              ਡਿਸਕਾਊਂਟ ਦਾ ਕਾਰਨ (Discount Reason Required)
+            </h3>
+            
+            <p className="text-xs text-slate-550 dark:text-slate-400 mb-4">
+              ਲਾਗੂ ਕੀਤਾ ਡਿਸਕਾਊਂਟ ਨਿਰਧਾਰਿਤ ਸੀਮਾ ਤੋਂ ਵੱਡਾ ਹੈ। ਕਿਰਪਾ ਕਰਕੇ ਕਾਰਨ ਚੁਣੋ:
+            </p>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-550 mb-1">
+                  ਕਾਰਨ ਚੁਣੋ (Select Reason)
+                </label>
+                <select
+                  value={reasonSelected}
+                  onChange={(e) => setReasonSelected(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-slate-550 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-sm font-semibold text-slate-950 dark:text-slate-50"
+                >
+                  <option value="Regular Customer">ਪੁਰਾਣਾ ਗਾਹਕ (Regular Customer)</option>
+                  <option value="Damaged Product">ਖਰਾਬ ਮਾਲ (Damaged Product)</option>
+                  <option value="Festival Offer">ਤਿਉਹਾਰ ਦੀ ਪੇਸ਼ਕਸ਼ (Festival Offer)</option>
+                  <option value="Clearance Sale">ਕਲੀਅਰੈਂਸ ਸੇਲ (Clearance Sale)</option>
+                  <option value="Price Match">ਮੁੱਲ ਮੇਲ (Price Match)</option>
+                  <option value="Other">ਹੋਰ (Other)</option>
+                </select>
+              </div>
+
+              {reasonSelected === 'Other' && (
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">
+                    ਵੇਰਵਾ ਲਿਖੋ (Enter Custom Reason)
+                  </label>
+                  <input
+                    type="text"
+                    value={customReason}
+                    onChange={(e) => setCustomReason(e.target.value)}
+                    className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-sm font-semibold"
+                    placeholder="e.g. Special owner approval"
+                    required
+                  />
+                </div>
+              )}
+
+              <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-slate-105 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowReasonModal(false)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-850 dark:hover:bg-slate-800 rounded-lg text-sm font-bold text-slate-700 dark:text-slate-350"
+                >
+                  ਰੱਦ ਕਰੋ (Cancel)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const finalReason = reasonSelected === 'Other' ? customReason : reasonSelected;
+                    if (reasonSelected === 'Other' && !customReason.trim()) {
+                      showToast('Please enter a custom reason', 'warning');
+                      return;
+                    }
+                    setShowReasonModal(false);
+                    executeCheckout(autoPrintAfterReason, finalReason);
+                  }}
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold active:scale-95"
+                >
+                  ਬਿੱਲ ਪੂਰਾ ਕਰੋ (Complete Checkout)
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

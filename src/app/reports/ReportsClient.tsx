@@ -438,6 +438,55 @@ export default function ReportsClient({ userRole }: ReportsClientProps) {
             </div>
           )}
 
+          {reportType === 'sales' && filteredData.length > 0 && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {(() => {
+                const totalSalesAmt = filteredData.reduce((sum, sale) => sum + parseFloat(sale.total || '0'), 0);
+                const totalDiscountAmt = filteredData.reduce((sum, sale) => sum + parseFloat(sale.totalDiscount || '0'), 0);
+                
+                // Group discounts by staff/cashier
+                const cashierDiscounts: Record<string, number> = {};
+                filteredData.forEach((sale) => {
+                  const cashierName = sale.createdByUser?.name || 'Unknown Staff';
+                  const disc = parseFloat(sale.totalDiscount || '0');
+                  if (disc > 0) {
+                    cashierDiscounts[cashierName] = (cashierDiscounts[cashierName] || 0) + disc;
+                  }
+                });
+
+                return (
+                  <>
+                    <div className="bg-zinc-50 dark:bg-zinc-850 p-4 rounded-2xl border border-zinc-100 dark:border-zinc-800 flex flex-col justify-between">
+                      <span className="text-[10px] uppercase tracking-wider text-zinc-450 dark:text-zinc-500 font-bold">ਕੁੱਲ ਵਿਕਰੀ (Total Sales)</span>
+                      <span className="text-lg font-black mt-1 text-indigo-600 dark:text-indigo-400">₹{totalSalesAmt.toFixed(2)}</span>
+                    </div>
+                    
+                    <div className="bg-zinc-50 dark:bg-zinc-850 p-4 rounded-2xl border border-zinc-100 dark:border-zinc-800 flex flex-col justify-between">
+                      <span className="text-[10px] uppercase tracking-wider text-zinc-450 dark:text-zinc-550 font-bold">ਕੁੱਲ ਡਿਸਕਾਊਂਟ (Total Discount Given)</span>
+                      <span className="text-lg font-black mt-1 text-amber-600 dark:text-amber-500 font-bold">₹{totalDiscountAmt.toFixed(2)}</span>
+                    </div>
+
+                    <div className="bg-zinc-50 dark:bg-zinc-850 p-4 rounded-2xl border border-zinc-100 dark:border-zinc-800 flex flex-col justify-between md:col-span-1">
+                      <span className="text-[10px] uppercase tracking-wider text-zinc-450 dark:text-zinc-500 font-bold font-semibold">ਸਟਾਫ਼ ਵਾਈਜ਼ ਡਿਸਕਾਊਂਟ (Discount by Cashier)</span>
+                      <div className="mt-1.5 space-y-1 max-h-[80px] overflow-y-auto text-xs font-semibold">
+                        {Object.keys(cashierDiscounts).length === 0 ? (
+                          <span className="text-slate-400">No discounts given</span>
+                        ) : (
+                          Object.entries(cashierDiscounts).map(([name, val]) => (
+                            <div key={name} className="flex justify-between text-zinc-700 dark:text-zinc-300">
+                              <span>{name}:</span>
+                              <span className="font-bold">₹{val.toFixed(2)}</span>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          )}
+
           {/* Preview Grid Table */}
           <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-100 dark:border-zinc-800 shadow-sm overflow-hidden">
             <div className="p-4 bg-zinc-50 dark:bg-zinc-850/50 border-b border-zinc-100 dark:border-zinc-800 flex justify-between items-center">

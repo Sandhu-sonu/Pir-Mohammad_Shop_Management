@@ -1,11 +1,15 @@
 import { prisma } from '../prisma';
-import { Prisma, PaymentMethod, TransactionType, CustomerLedgerType } from '@prisma/client';
+import { Prisma, PaymentMethod, TransactionType, CustomerLedgerType, DiscountType } from '@prisma/client';
 import { InventoryRepository } from './InventoryRepository';
 
 export interface SaleItemInput {
   productId: string;
   quantity: number;
   sellingPrice: number;
+  originalPrice: number;
+  itemDiscount: number;
+  discountType: DiscountType;
+  discountReason?: string;
 }
 
 export interface CreateSaleInput {
@@ -16,6 +20,9 @@ export interface CreateSaleInput {
   paymentMethod: PaymentMethod;
   paidAmount: number;
   userId?: string;
+  billDiscount: number;
+  billDiscountType: DiscountType;
+  discountReason?: string;
 }
 
 export class SalesRepository {
@@ -103,7 +110,7 @@ export class SalesRepository {
   }
 
   static async create(data: CreateSaleInput) {
-    const { shopId, customerId, items, discount, paymentMethod, paidAmount, userId } = data;
+    const { shopId, customerId, items, paymentMethod, paidAmount, userId } = data;
 
     return prisma.$transaction(async (tx) => {
       // 1. Validate items and compute totals (batch query optimized)
@@ -128,21 +135,71 @@ export class SalesRepository {
         }
 
         const qty = new Prisma.Decimal(item.quantity.toString());
-        const sellPrice = new Prisma.Decimal(item.sellingPrice.toString());
-        const total = qty.times(sellPrice);
+        const originalPrice = new Prisma.Decimal(item.originalPrice.toString());
+        const itemDiscount = new Prisma.Decimal(item.itemDiscount.toString());
+
+        // Calculate actual unit selling price based on item discount type
+        let actualPrice = new Prisma.Decimal('0');
+        if (item.discountType === 'PERCENT') {
+          if (itemDiscount.gt(100)) {
+            throw new Error(`Discount percentage cannot exceed 100% on product ${product.namePa || product.nameEn}`);
+          }
+          actualPrice = originalPrice.times(new Prisma.Decimal('1').minus(itemDiscount.div('100')));
+        } else {
+          if (itemDiscount.gt(originalPrice)) {
+            throw new Error(`Discount amount cannot exceed product price on product ${product.namePa || product.nameEn}`);
+          }
+          actualPrice = originalPrice.minus(itemDiscount);
+        }
+
+        if (actualPrice.lt(0)) {
+          throw new Error(`Actual selling price cannot be negative on product ${product.namePa || product.nameEn}`);
+        }
+
+        const total = qty.times(actualPrice);
         subTotal = subTotal.plus(total);
 
         resolvedItems.push({
           productId: product.id,
           quantity: qty,
           purchasePrice: product.purchasePrice,
-          sellingPrice: sellPrice,
+          sellingPrice: actualPrice,
+          originalPrice,
+          itemDiscount,
+          discountType: item.discountType,
+          discountReason: item.discountReason || null,
           total,
         });
       }
 
-      const discAmount = new Prisma.Decimal(discount.toString());
-      const totalAmount = subTotal.minus(discAmount);
+      // 2. Calculate bill-level discount
+      const billDiscount = new Prisma.Decimal(data.billDiscount.toString());
+      let billDiscountAmt = new Prisma.Decimal('0');
+      if (data.billDiscountType === 'PERCENT') {
+        if (billDiscount.gt(100)) {
+          throw new Error('Bill discount percentage cannot exceed 100%');
+        }
+        billDiscountAmt = subTotal.times(billDiscount.div('100'));
+      } else {
+        if (billDiscount.gt(subTotal)) {
+          throw new Error('Bill discount amount cannot exceed subtotal');
+        }
+        billDiscountAmt = billDiscount;
+      }
+
+      const totalAmount = subTotal.minus(billDiscountAmt);
+      if (totalAmount.lt(0)) {
+        throw new Error('Final invoice total cannot be negative');
+      }
+
+      // Calculate total discount = sum(itemDiscountAmt) + billDiscountAmt
+      let totalItemDiscountAmt = new Prisma.Decimal('0');
+      for (const rItem of resolvedItems) {
+        const itemDiscountAmt = rItem.quantity.times(rItem.originalPrice.minus(rItem.sellingPrice));
+        totalItemDiscountAmt = totalItemDiscountAmt.plus(itemDiscountAmt);
+      }
+      const totalDiscount = totalItemDiscountAmt.plus(billDiscountAmt);
+
       const paid = new Prisma.Decimal(paidAmount.toString());
       const due = totalAmount.minus(paid);
 
@@ -153,22 +210,26 @@ export class SalesRepository {
       // Generate invoice number
       const invoiceNumber = await this.generateInvoiceNumber(shopId);
 
-      // 2. Create Sale record
+      // 3. Create Sale record
       const sale = await tx.sale.create({
         data: {
           invoiceNumber,
           shopId,
           customerId,
           subTotal,
-          discount: discAmount,
+          discount: totalDiscount,
+          billDiscount,
+          billDiscountType: data.billDiscountType,
+          discountReason: data.discountReason || null,
           total: totalAmount,
           paymentMethod,
           paidAmount: paid,
           dueAmount: due,
+          createdByUserId: userId,
         },
       });
 
-      // 3. Create Sale Items & Adjust Stock
+      // 4. Create Sale Items & Adjust Stock
       for (const rItem of resolvedItems) {
         await tx.saleItem.create({
           data: {
@@ -177,6 +238,10 @@ export class SalesRepository {
             quantity: rItem.quantity,
             purchasePrice: rItem.purchasePrice,
             sellingPrice: rItem.sellingPrice,
+            originalPrice: rItem.originalPrice,
+            itemDiscount: rItem.itemDiscount,
+            discountType: rItem.discountType,
+            discountReason: rItem.discountReason,
             total: rItem.total,
           },
         });

@@ -57,6 +57,7 @@ export default async function SalesPage() {
           customers={JSON.parse(JSON.stringify(customers.items))}
           salesData={salesData}
           shop={JSON.parse(JSON.stringify(shop))}
+          role={user.role}
         />
       </div>
     </Shell>

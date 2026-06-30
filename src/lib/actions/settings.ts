@@ -3,7 +3,7 @@
 import { prisma } from '../../db/prisma';
 import { getCurrentUser } from './auth';
 import { revalidatePath } from 'next/cache';
-import { Role, BusinessType, ReceiptFormat, PrinterType } from '@prisma/client';
+import { Role, BusinessType, ReceiptFormat, PrinterType, DiscountType } from '@prisma/client';
 import { requirePermission } from '../permissions';
 import { writeFile, mkdir } from 'fs/promises';
 import { join } from 'path';
@@ -65,6 +65,12 @@ export async function updateShopSettingsAction(data: {
   currencySymbol?: string;
   decimalPrecision?: number;
   dateFormat?: string;
+  allowItemDiscount?: boolean;
+  allowBillDiscount?: boolean;
+  maxStaffDiscount?: number;
+  requireDiscountReason?: boolean;
+  reasonPercentLimit?: number;
+  reasonAmountLimit?: number;
 }) {
   const user = await getCurrentUser();
   if (!user) throw new Error('Unauthorized');
@@ -111,6 +117,12 @@ export async function updateShopSettingsAction(data: {
         currencySymbol: data.currencySymbol || '₹',
         decimalPrecision: data.decimalPrecision !== undefined ? Number(data.decimalPrecision) : 2,
         dateFormat: data.dateFormat || 'DD/MM/YYYY',
+        allowItemDiscount: data.allowItemDiscount !== undefined ? data.allowItemDiscount : true,
+        allowBillDiscount: data.allowBillDiscount !== undefined ? data.allowBillDiscount : true,
+        maxStaffDiscount: data.maxStaffDiscount !== undefined ? data.maxStaffDiscount : 10.00,
+        requireDiscountReason: data.requireDiscountReason !== undefined ? data.requireDiscountReason : false,
+        reasonPercentLimit: data.reasonPercentLimit !== undefined ? data.reasonPercentLimit : 15.00,
+        reasonAmountLimit: data.reasonAmountLimit !== undefined ? data.reasonAmountLimit : 500.00,
       },
       create: {
         shopId,
@@ -124,6 +136,12 @@ export async function updateShopSettingsAction(data: {
         currencySymbol: data.currencySymbol || '₹',
         decimalPrecision: data.decimalPrecision !== undefined ? Number(data.decimalPrecision) : 2,
         dateFormat: data.dateFormat || 'DD/MM/YYYY',
+        allowItemDiscount: data.allowItemDiscount !== undefined ? data.allowItemDiscount : true,
+        allowBillDiscount: data.allowBillDiscount !== undefined ? data.allowBillDiscount : true,
+        maxStaffDiscount: data.maxStaffDiscount !== undefined ? data.maxStaffDiscount : 10.00,
+        requireDiscountReason: data.requireDiscountReason !== undefined ? data.requireDiscountReason : false,
+        reasonPercentLimit: data.reasonPercentLimit !== undefined ? data.reasonPercentLimit : 15.00,
+        reasonAmountLimit: data.reasonAmountLimit !== undefined ? data.reasonAmountLimit : 500.00,
       },
     });
   });

@@ -10,7 +10,7 @@ import { PurchaseRepository } from '../src/db/repositories/PurchaseRepository';
 import { PurchaseReturnRepository } from '../src/db/repositories/PurchaseReturnRepository';
 import { SupplierRepository } from '../src/db/repositories/SupplierRepository';
 import { BarcodeRepository } from '../src/db/repositories/BarcodeRepository';
-import { Role, PaymentMethod, TransactionType, PurchaseStatus } from '@prisma/client';
+import { Role, PaymentMethod, TransactionType, PurchaseStatus, DiscountType } from '@prisma/client';
 
 async function runTests() {
   console.log('==================================================');
@@ -127,11 +127,13 @@ async function runTests() {
     const sale = await SalesRepository.create({
       shopId: shop.id,
       customerId: testCustomer.id,
-      items: [{ productId: testProduct.id, quantity: 3, sellingPrice: 50 }],
+      items: [{ productId: testProduct.id, quantity: 3, sellingPrice: 50, originalPrice: 50, itemDiscount: 0, discountType: DiscountType.FIXED }],
       discount: 10,
       paymentMethod: PaymentMethod.CREDIT, // Outstanding dues
       paidAmount: 0, // Dues will be total (150 - 10) = 140
       userId: owner.id,
+      billDiscount: 10,
+      billDiscountType: DiscountType.FIXED,
     });
 
     console.log(`✔ Completed credit sale invoice: ${sale.invoiceNumber}`);

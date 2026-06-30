@@ -2,7 +2,7 @@
 
 import { SalesService } from '../../db/services/SalesService';
 import { getCurrentUser } from './auth';
-import { PaymentMethod } from '@prisma/client';
+import { PaymentMethod, DiscountType } from '@prisma/client';
 import { revalidatePath } from 'next/cache';
 import { requirePermission } from '../permissions';
 import { handleActionError } from '../errors';
@@ -13,10 +13,17 @@ export interface CreateSaleActionInput {
     productId: string;
     quantity: number;
     sellingPrice: number;
+    originalPrice: number;
+    itemDiscount: number;
+    discountType: DiscountType;
+    discountReason?: string;
   }[];
-  discount: number;
+  discount: number; // Represents total calculated discount
   paymentMethod: PaymentMethod;
   paidAmount: number;
+  billDiscount: number;
+  billDiscountType: DiscountType;
+  discountReason?: string;
 }
 
 export async function createSaleAction(data: CreateSaleActionInput) {

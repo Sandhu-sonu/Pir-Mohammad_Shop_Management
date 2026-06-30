@@ -38,6 +38,12 @@ interface SettingsClientProps {
       currencySymbol: string;
       decimalPrecision: number;
       dateFormat: string;
+      allowItemDiscount?: boolean;
+      allowBillDiscount?: boolean;
+      maxStaffDiscount?: any;
+      requireDiscountReason?: boolean;
+      reasonPercentLimit?: any;
+      reasonAmountLimit?: any;
     } | null;
   };
   role: string;
@@ -73,6 +79,13 @@ export default function SettingsClient({ shop, role }: SettingsClientProps) {
   const [currencySymbol, setCurrencySymbol] = useState(shop.settings?.currencySymbol || '₹');
   const [decimalPrecision, setDecimalPrecision] = useState(shop.settings?.decimalPrecision ?? 2);
   const [dateFormat, setDateFormat] = useState(shop.settings?.dateFormat || 'DD/MM/YYYY');
+  
+  const [allowItemDiscount, setAllowItemDiscount] = useState(shop.settings?.allowItemDiscount ?? true);
+  const [allowBillDiscount, setAllowBillDiscount] = useState(shop.settings?.allowBillDiscount ?? true);
+  const [maxStaffDiscount, setMaxStaffDiscount] = useState(shop.settings?.maxStaffDiscount !== undefined ? Number(shop.settings.maxStaffDiscount) : 10);
+  const [requireDiscountReason, setRequireDiscountReason] = useState(shop.settings?.requireDiscountReason ?? false);
+  const [reasonPercentLimit, setReasonPercentLimit] = useState(shop.settings?.reasonPercentLimit !== undefined ? Number(shop.settings.reasonPercentLimit) : 15);
+  const [reasonAmountLimit, setReasonAmountLimit] = useState(shop.settings?.reasonAmountLimit !== undefined ? Number(shop.settings.reasonAmountLimit) : 500);
   
   const [loading, setLoading] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -188,6 +201,12 @@ export default function SettingsClient({ shop, role }: SettingsClientProps) {
         currencySymbol,
         decimalPrecision: Number(decimalPrecision),
         dateFormat,
+        allowItemDiscount,
+        allowBillDiscount,
+        maxStaffDiscount: Number(maxStaffDiscount),
+        requireDiscountReason,
+        reasonPercentLimit: Number(reasonPercentLimit),
+        reasonAmountLimit: Number(reasonAmountLimit),
       });
 
       if (res.success) {
@@ -611,6 +630,105 @@ export default function SettingsClient({ shop, role }: SettingsClientProps) {
                     <option value="YYYY-MM-DD">YYYY-MM-DD</option>
                   </select>
                 </div>
+              </div>
+            </div>
+
+            {/* Discount Rules Card */}
+            <div className="border border-slate-200 dark:border-slate-800 rounded-xl p-5 bg-slate-50/30 dark:bg-slate-900/30 space-y-4">
+              <h3 className="text-sm font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 border-b border-slate-200/60 dark:border-slate-800 pb-2">
+                ਡਿਸਕਾਊਂਟ ਨਿਯਮ (Discount Rules)
+              </h3>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="flex items-center gap-2 pt-2">
+                  <input
+                    type="checkbox"
+                    id="allowItemDiscount"
+                    checked={allowItemDiscount}
+                    onChange={(e) => setAllowItemDiscount(e.target.checked)}
+                    className="w-5 h-5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <label htmlFor="allowItemDiscount" className="text-sm font-bold select-none cursor-pointer">
+                    ਆਈਟਮ-ਵਾਰ ਡਿਸਕਾਊਂਟ ਚਾਲੂ ਕਰੋ (Allow Item Discounts)
+                  </label>
+                </div>
+
+                <div className="flex items-center gap-2 pt-2">
+                  <input
+                    type="checkbox"
+                    id="allowBillDiscount"
+                    checked={allowBillDiscount}
+                    onChange={(e) => setAllowBillDiscount(e.target.checked)}
+                    className="w-5 h-5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <label htmlFor="allowBillDiscount" className="text-sm font-bold select-none cursor-pointer">
+                    ਬਿੱਲ-ਵਾਰ ਡਿਸਕਾਊਂਟ ਚਾਲੂ ਕਰੋ (Allow Bill Discounts)
+                  </label>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">
+                    ਸਟਾਫ ਲਈ ਅਧਿਕਤਮ ਡਿਸਕਾਊਂਟ Limit (%) (Max Staff Discount Limit)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    max="100"
+                    value={maxStaffDiscount}
+                    onChange={(e) => setMaxStaffDiscount(Number(e.target.value))}
+                    className="mt-1.5 w-full px-4 py-3 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-sm font-bold"
+                  />
+                </div>
+              </div>
+
+              <div className="border-t border-slate-200/60 dark:border-slate-800 pt-4 space-y-4">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="requireDiscountReason"
+                    checked={requireDiscountReason}
+                    onChange={(e) => setRequireDiscountReason(e.target.checked)}
+                    className="w-5 h-5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <label htmlFor="requireDiscountReason" className="text-sm font-bold select-none cursor-pointer">
+                    ਵੱਡੇ ਡਿਸਕਾਊਂਟ ਲਈ ਕਾਰਨ ਪੁੱਛੋ (Require Reason for Large Discounts)
+                  </label>
+                </div>
+
+                {requireDiscountReason && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">
+                        ਡਿਸਕਾਊਂਟ ਪ੍ਰਤੀਸ਼ਤ ਸੀਮਾ (%) (Reason Threshold Percent)
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        max="100"
+                        value={reasonPercentLimit}
+                        onChange={(e) => setReasonPercentLimit(Number(e.target.value))}
+                        className="mt-1.5 w-full px-4 py-3 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-sm font-bold"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">
+                        ਡਿਸਕਾਊਂਟ ਰਕਮ ਸੀਮਾ (₹) (Reason Threshold Amount)
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={reasonAmountLimit}
+                        onChange={(e) => setReasonAmountLimit(Number(e.target.value))}
+                        className="mt-1.5 w-full px-4 py-3 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-sm font-bold"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
