@@ -5,6 +5,7 @@ import { getCurrentUser } from './auth';
 import { revalidatePath } from 'next/cache';
 import { Role, BusinessType, ReceiptFormat, PrinterType, DiscountType } from '@prisma/client';
 import { requirePermission } from '../permissions';
+import { seedDefaultCategories } from './categories';
 import { writeFile, mkdir } from 'fs/promises';
 import { join } from 'path';
 
@@ -71,6 +72,8 @@ export async function updateShopSettingsAction(data: {
   requireDiscountReason?: boolean;
   reasonPercentLimit?: number;
   reasonAmountLimit?: number;
+  autoSuggestPunjabi?: boolean;
+  autoSuggestEnglish?: boolean;
 }) {
   const user = await getCurrentUser();
   if (!user) throw new Error('Unauthorized');
@@ -97,6 +100,7 @@ export async function updateShopSettingsAction(data: {
         throw new Error('Only OWNER can change the shop Business Type');
       }
       updateData.businessType = data.businessType;
+      await seedDefaultCategories(tx, shopId, data.businessType);
     }
 
     await tx.shop.update({
@@ -123,6 +127,8 @@ export async function updateShopSettingsAction(data: {
         requireDiscountReason: data.requireDiscountReason !== undefined ? data.requireDiscountReason : false,
         reasonPercentLimit: data.reasonPercentLimit !== undefined ? data.reasonPercentLimit : 15.00,
         reasonAmountLimit: data.reasonAmountLimit !== undefined ? data.reasonAmountLimit : 500.00,
+        autoSuggestPunjabi: data.autoSuggestPunjabi !== undefined ? data.autoSuggestPunjabi : true,
+        autoSuggestEnglish: data.autoSuggestEnglish !== undefined ? data.autoSuggestEnglish : true,
       },
       create: {
         shopId,
@@ -142,6 +148,8 @@ export async function updateShopSettingsAction(data: {
         requireDiscountReason: data.requireDiscountReason !== undefined ? data.requireDiscountReason : false,
         reasonPercentLimit: data.reasonPercentLimit !== undefined ? data.reasonPercentLimit : 15.00,
         reasonAmountLimit: data.reasonAmountLimit !== undefined ? data.reasonAmountLimit : 500.00,
+        autoSuggestPunjabi: data.autoSuggestPunjabi !== undefined ? data.autoSuggestPunjabi : true,
+        autoSuggestEnglish: data.autoSuggestEnglish !== undefined ? data.autoSuggestEnglish : true,
       },
     });
   });

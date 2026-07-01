@@ -4,6 +4,7 @@ import { cookies } from 'next/headers';
 import { prisma } from '../../db/prisma';
 import { Role, BusinessType } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { seedDefaultCategories } from './categories';
 
 export interface UserSession {
   userId: string;
@@ -30,6 +31,7 @@ export async function login(mobileOrUsername: string, passwordInput: string): Pr
           address: 'G.T. Road, Jalandhar, Punjab',
           gst: '03AAAAA1111A1Z1',
           currency: 'INR',
+          businessType: BusinessType.GENERAL_STORE,
         },
         include: { settings: true },
       });
@@ -43,6 +45,9 @@ export async function login(mobileOrUsername: string, passwordInput: string): Pr
         },
       });
       shop.settings = settings;
+
+      // Seed default categories for general store
+      await seedDefaultCategories(prisma, shop.id, shop.businessType);
     }
 
     // Find or create admin user in DB

@@ -294,7 +294,7 @@ export class BackupService {
             ...s,
             total: new Prisma.Decimal(s.total),
             paidAmount: new Prisma.Decimal(s.paidAmount),
-            due: new Prisma.Decimal(s.due),
+            dueAmount: new Prisma.Decimal(s.dueAmount),
             discount: new Prisma.Decimal(s.discount),
             date: new Date(s.date),
           }));
@@ -315,9 +315,9 @@ export class BackupService {
         if (data.purchases?.length > 0) {
           const formattedPurchases = data.purchases.map((p: any) => ({
             ...p,
-            totalAmount: new Prisma.Decimal(p.totalAmount),
+            total: new Prisma.Decimal(p.total),
             paidAmount: new Prisma.Decimal(p.paidAmount),
-            due: new Prisma.Decimal(p.due),
+            dueAmount: new Prisma.Decimal(p.dueAmount),
             date: new Date(p.date),
           }));
           await tx.purchase.createMany({ data: formattedPurchases });
@@ -328,7 +328,6 @@ export class BackupService {
             ...pi,
             quantity: new Prisma.Decimal(pi.quantity),
             purchasePrice: new Prisma.Decimal(pi.purchasePrice),
-            total: new Prisma.Decimal(pi.total),
           }));
           await tx.purchaseItem.createMany({ data: formattedPurchaseItems });
         }

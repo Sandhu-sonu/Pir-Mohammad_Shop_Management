@@ -207,6 +207,8 @@ model Settings {
   requireDiscountReason Boolean       @default(false)
   reasonPercentLimit    Decimal       @db.Decimal(5, 2) @default(15.00)
   reasonAmountLimit     Decimal       @db.Decimal(10, 2) @default(500.00)
+  autoSuggestPunjabi    Boolean       @default(true)
+  autoSuggestEnglish    Boolean       @default(true)
 
   @@map("settings")
 }

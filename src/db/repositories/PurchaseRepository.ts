@@ -44,6 +44,7 @@ export class PurchaseRepository {
             product: true,
           },
         },
+        purchaseReturns: true,
       },
       orderBy: { date: 'desc' },
     });

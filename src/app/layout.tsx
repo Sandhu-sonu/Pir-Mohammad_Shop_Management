@@ -26,7 +26,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="pa" className={`${inter.variable} ${gurmukhi.variable} h-full antialiased`}>
+    <html lang="pa" className={`${inter.variable} ${gurmukhi.variable} h-full antialiased`} suppressHydrationWarning>
       <body className="min-h-full bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100 font-sans">
         <ThemeProvider>{children}</ThemeProvider>
         <script
