@@ -50,7 +50,7 @@ async function runTests() {
         }
       };
     }
-    return originalRequire.apply(this, arguments);
+    return originalRequire.apply(this, arguments as any);
   };
 
   // Now dynamically import Server Actions!

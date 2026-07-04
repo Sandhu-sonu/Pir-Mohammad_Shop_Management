@@ -12,6 +12,7 @@ enum Role {
   MANAGER
   STAFF
   VIEW_ONLY
+  SUPER_ADMIN
 }
 
 enum BusinessType {
@@ -103,41 +104,50 @@ enum StockAlertStatus {
 }
 
 model User {
-  id                  String               @id @default(uuid())
-  mobile              String               @unique
-  name                String
-  password            String
-  role                Role                 @default(STAFF)
-  pin                 String?              // Hashed PIN
-  status              UserStatus           @default(ACTIVE)
-  mustChangePin       Boolean              @default(true)
-  createdAt           DateTime             @default(now())
-  updatedAt           DateTime             @updatedAt
-  shopId              String
-  shop                Shop                 @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  auditLogs           AuditLog[]
-  barcodeScanSessions BarcodeScanSession[]
+  id                   String                 @id @default(uuid())
+  mobile               String                 @unique
+  name                 String
+  password             String
+  role                 Role                   @default(STAFF)
+  pin                  String? // Hashed PIN
+  status               UserStatus             @default(ACTIVE)
+  mustChangePin        Boolean                @default(true)
+  adminRole            AdminRole?
+  mobileVerified       Boolean                @default(false)
+  emailVerified        Boolean                @default(false)
+  failedAttempts       Int                    @default(0)
+  lockedUntil          DateTime?
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+  shopId               String
+  shop                 Shop                   @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  auditLogs            AuditLog[]
+  barcodeScanSessions  BarcodeScanSession[]
+  supportTickets       SupportTicket[]        @relation("CreatedTickets")
+  assignedTickets      SupportTicket[]        @relation("AssignedTickets")
+  ticketMessages       SupportTicketMessage[]
+  changedSubscriptions SubscriptionHistory[]  @relation("SubscriptionModifier")
 
   // Relations
-  createdSales        Sale[]               @relation("CreatedByUser")
-  closedSales         Sale[]               @relation("ClosedByUser")
-  reversedSales       Sale[]               @relation("ReversedByUser")
-  expenses            Expense[]            @relation("ExpenseCreatedByUser")
-  reversedExpenses    Expense[]            @relation("ExpenseReversedByUser")
-  dailyClosings       DailyClosing[]       @relation("DailyClosingClosedByUser")
-  staffClosings       DailyClosing[]       @relation("DailyClosingStaff")
-  ownerClosings       DailyClosing[]       @relation("DailyClosingOwner")
-  reversedClosings    DailyClosing[]       @relation("DailyClosingReversedByUser")
-  purchases           Purchase[]
-  backupsCreated       BackupHistory[]      @relation("BackupCreatedByUser")
-  restoresPerformed    RestoreLog[]         @relation("RestorePerformedByUser")
-  exportsCreated       ExportHistory[]      @relation("ExportCreatedByUser")
+  createdSales      Sale[]          @relation("CreatedByUser")
+  closedSales       Sale[]          @relation("ClosedByUser")
+  reversedSales     Sale[]          @relation("ReversedByUser")
+  expenses          Expense[]       @relation("ExpenseCreatedByUser")
+  reversedExpenses  Expense[]       @relation("ExpenseReversedByUser")
+  dailyClosings     DailyClosing[]  @relation("DailyClosingClosedByUser")
+  staffClosings     DailyClosing[]  @relation("DailyClosingStaff")
+  ownerClosings     DailyClosing[]  @relation("DailyClosingOwner")
+  reversedClosings  DailyClosing[]  @relation("DailyClosingReversedByUser")
+  purchases         Purchase[]
+  backupsCreated    BackupHistory[] @relation("BackupCreatedByUser")
+  restoresPerformed RestoreLog[]    @relation("RestorePerformedByUser")
+  exportsCreated    ExportHistory[] @relation("ExportCreatedByUser")
 
   @@index([shopId])
 }
 
 model Shop {
-  id                  String               @id @default(uuid())
+  id                  String                @id @default(uuid())
   name                String
   address             String?
   gst                 String?
@@ -146,11 +156,13 @@ model Shop {
   footerMessage       String?
   returnPolicy        String?
   logo                String?
-  currency            String               @default("INR")
-  businessType        BusinessType         @default(GENERAL_STORE)
-  gstRegistered       Boolean              @default(false)
-  createdAt           DateTime             @default(now())
-  updatedAt           DateTime             @updatedAt
+  currency            String                @default("INR")
+  businessType        BusinessType          @default(GENERAL_STORE)
+  gstRegistered       Boolean               @default(false)
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+  isSuspended         Boolean               @default(false)
+  deletedAt           DateTime?
   users               User[]
   products            Product[]
   customers           Customer[]
@@ -167,6 +179,11 @@ model Shop {
   backups             BackupHistory[]
   restores            RestoreLog[]
   exports             ExportHistory[]
+  subscription        Subscription?
+  subscriptionHistory SubscriptionHistory[]
+  supportTickets      SupportTicket[]
+  notifications       Notification[]
+  auditLogs           AuditLog[]
 
   @@map("shops")
 }
@@ -203,12 +220,16 @@ model Settings {
   dateFormat            String        @default("DD/MM/YYYY") // "DD/MM/YYYY" or "DD-MM-YYYY"
   allowItemDiscount     Boolean       @default(true)
   allowBillDiscount     Boolean       @default(true)
-  maxStaffDiscount      Decimal       @db.Decimal(5, 2) @default(10.00)
+  maxStaffDiscount      Decimal       @default(10.00) @db.Decimal(5, 2)
   requireDiscountReason Boolean       @default(false)
-  reasonPercentLimit    Decimal       @db.Decimal(5, 2) @default(15.00)
-  reasonAmountLimit     Decimal       @db.Decimal(10, 2) @default(500.00)
+  reasonPercentLimit    Decimal       @default(15.00) @db.Decimal(5, 2)
+  reasonAmountLimit     Decimal       @default(500.00) @db.Decimal(10, 2)
   autoSuggestPunjabi    Boolean       @default(true)
   autoSuggestEnglish    Boolean       @default(true)
+  minPasswordLength        Int           @default(6)
+  requirePasswordUppercase Boolean       @default(false)
+  requirePasswordNumber    Boolean       @default(false)
+  requirePasswordSpecial   Boolean       @default(false)
 
   @@map("settings")
 }
@@ -236,23 +257,23 @@ model Brand {
 }
 
 model Product {
-  id              String                 @id @default(uuid())
-  sku             String?
-  barcode         String?
-  nameEn          String
-  namePa          String
-  categoryName    String?                @map("category") // Backward compatible mapping
-  categoryId      String?
-  category        Category?              @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  brandId         String?
-  brand           Brand?                 @relation(fields: [brandId], references: [id], onDelete: SetNull)
-  purchasePrice   Decimal                @db.Decimal(10, 2)
-  sellingPrice    Decimal                @db.Decimal(10, 2)
-  currentQuantity Decimal                @db.Decimal(10, 2) @default(0)
-  unit            String                 @default("PCS") // PCS, KG, LTR, BOX, etc.
-  minStock        Decimal                @db.Decimal(10, 2) @default(5) // Backward compatible naming
-  reorderLevel    Decimal                @db.Decimal(10, 2) @default(5)
-  taxRate         Decimal                @db.Decimal(5, 2) @default(0)
+  id               String                 @id @default(uuid())
+  sku              String?
+  barcode          String?
+  nameEn           String
+  namePa           String
+  categoryName     String?                @map("category") // Backward compatible mapping
+  categoryId       String?
+  category         Category?              @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  brandId          String?
+  brand            Brand?                 @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  purchasePrice    Decimal                @db.Decimal(10, 2)
+  sellingPrice     Decimal                @db.Decimal(10, 2)
+  currentQuantity  Decimal                @default(0) @db.Decimal(10, 2)
+  unit             String                 @default("PCS") // PCS, KG, LTR, BOX, etc.
+  minStock         Decimal                @default(5) @db.Decimal(10, 2) // Backward compatible naming
+  reorderLevel     Decimal                @default(5) @db.Decimal(10, 2)
+  taxRate          Decimal                @default(0) @db.Decimal(5, 2)
   isActive         Boolean                @default(true)
   isAutoTranslated Boolean                @default(false)
   supplierId       String?
@@ -260,13 +281,13 @@ model Product {
   shopId           String
   shop             Shop                   @relation(fields: [shopId], references: [id], onDelete: Cascade)
   isDeleted        Boolean                @default(false)
-  createdAt       DateTime               @default(now())
-  updatedAt       DateTime               @updatedAt
-  transactions    InventoryTransaction[]
-  saleItems       SaleItem[]
-  purchaseItems   PurchaseItem[]
-  purchaseReturns PurchaseReturn[]
-  stockAlerts     StockAlert[]
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+  transactions     InventoryTransaction[]
+  saleItems        SaleItem[]
+  purchaseItems    PurchaseItem[]
+  purchaseReturns  PurchaseReturn[]
+  stockAlerts      StockAlert[]
 
   // Optional fields for configuration engine (Phase 9)
   manufacturer      String?
@@ -281,7 +302,7 @@ model Product {
   size              String?
   variant           String?
   hsnCode           String?
-  gstRate           Decimal?                @db.Decimal(5, 2)
+  gstRate           Decimal?  @db.Decimal(5, 2)
 
   @@unique([shopId, barcode])
   @@unique([shopId, sku])
@@ -301,7 +322,7 @@ model InventoryTransaction {
   quantity    Decimal         @db.Decimal(10, 2)
   previousQty Decimal         @db.Decimal(10, 2)
   newQty      Decimal         @db.Decimal(10, 2)
-  price       Decimal         @db.Decimal(10, 2) @default(0)
+  price       Decimal         @default(0) @db.Decimal(10, 2)
   referenceId String?
   note        String?
   createdAt   DateTime        @default(now())
@@ -318,8 +339,8 @@ model Customer {
   mobile         String?
   address        String?
   notes          String?
-  openingBalance Decimal          @db.Decimal(10, 2) @default(0)
-  currentBalance Decimal          @db.Decimal(10, 2) @default(0)
+  openingBalance Decimal          @default(0) @db.Decimal(10, 2)
+  currentBalance Decimal          @default(0) @db.Decimal(10, 2)
   shopId         String
   shop           Shop             @relation(fields: [shopId], references: [id], onDelete: Cascade)
   isDeleted      Boolean          @default(false)
@@ -361,8 +382,8 @@ model Sale {
   shopId           String
   shop             Shop             @relation(fields: [shopId], references: [id], onDelete: Cascade)
   subTotal         Decimal          @db.Decimal(10, 2)
-  discount         Decimal          @db.Decimal(10, 2) @default(0)
-  billDiscount     Decimal          @db.Decimal(10, 2) @default(0)
+  discount         Decimal          @default(0) @db.Decimal(10, 2)
+  billDiscount     Decimal          @default(0) @db.Decimal(10, 2)
   billDiscountType DiscountType     @default(FIXED)
   discountReason   String?
   total            Decimal          @db.Decimal(10, 2)
@@ -378,11 +399,11 @@ model Sale {
 
   // Ownership tracking
   createdByUserId  String?
-  createdByUser    User?            @relation("CreatedByUser", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  createdByUser    User?   @relation("CreatedByUser", fields: [createdByUserId], references: [id], onDelete: SetNull)
   closedByUserId   String?
-  closedByUser     User?            @relation("ClosedByUser", fields: [closedByUserId], references: [id], onDelete: SetNull)
+  closedByUser     User?   @relation("ClosedByUser", fields: [closedByUserId], references: [id], onDelete: SetNull)
   reversedByUserId String?
-  reversedByUser   User?            @relation("ReversedByUser", fields: [reversedByUserId], references: [id], onDelete: SetNull)
+  reversedByUser   User?   @relation("ReversedByUser", fields: [reversedByUserId], references: [id], onDelete: SetNull)
 
   @@index([shopId])
   @@index([date])
@@ -394,19 +415,19 @@ model Sale {
 }
 
 model SaleItem {
-  id            String       @id @default(uuid())
-  saleId        String
-  sale          Sale         @relation(fields: [saleId], references: [id], onDelete: Cascade)
-  productId     String
-  product       Product      @relation(fields: [productId], references: [id], onDelete: Restrict)
-  quantity      Decimal      @db.Decimal(10, 2)
-  purchasePrice Decimal      @db.Decimal(10, 2)
-  sellingPrice  Decimal      @db.Decimal(10, 2)
-  originalPrice Decimal      @db.Decimal(10, 2) @default(0)
-  itemDiscount  Decimal      @db.Decimal(10, 2) @default(0)
-  discountType  DiscountType @default(FIXED)
+  id             String       @id @default(uuid())
+  saleId         String
+  sale           Sale         @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  productId      String
+  product        Product      @relation(fields: [productId], references: [id], onDelete: Restrict)
+  quantity       Decimal      @db.Decimal(10, 2)
+  purchasePrice  Decimal      @db.Decimal(10, 2)
+  sellingPrice   Decimal      @db.Decimal(10, 2)
+  originalPrice  Decimal      @default(0) @db.Decimal(10, 2)
+  itemDiscount   Decimal      @default(0) @db.Decimal(10, 2)
+  discountType   DiscountType @default(FIXED)
   discountReason String?
-  total         Decimal      @db.Decimal(10, 2)
+  total          Decimal      @db.Decimal(10, 2)
 
   @@index([saleId])
   @@index([productId])
@@ -436,7 +457,7 @@ model Supplier {
   shopId         String
   shop           Shop             @relation(fields: [shopId], references: [id], onDelete: Cascade)
   isDeleted      Boolean          @default(false)
-  currentBalance Decimal          @db.Decimal(10, 2) @default(0)
+  currentBalance Decimal          @default(0) @db.Decimal(10, 2)
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
   products       Product[]
@@ -594,7 +615,7 @@ model BarcodeLog {
 
 model Expense {
   id               String        @id @default(uuid())
-  category         String        // Predefined or custom category
+  category         String // Predefined or custom category
   amount           Decimal       @db.Decimal(10, 2)
   date             DateTime      @default(now())
   description      String?
@@ -604,7 +625,7 @@ model Expense {
   reversalReason   String?
   reversedByUserId String?
   reversedByUser   User?         @relation("ExpenseReversedByUser", fields: [reversedByUserId], references: [id], onDelete: SetNull)
-  userId           String?       // Created By
+  userId           String? // Created By
   user             User?         @relation("ExpenseCreatedByUser", fields: [userId], references: [id], onDelete: SetNull)
   shopId           String
   shop             Shop          @relation(fields: [shopId], references: [id], onDelete: Cascade)
@@ -620,13 +641,13 @@ model DailyClosing {
   id                   String   @id @default(uuid())
   date                 DateTime @default(now())
   openingCash          Decimal  @db.Decimal(10, 2)
-  salesCash            Decimal  @db.Decimal(10, 2) @default(0)
-  salesUpi             Decimal  @db.Decimal(10, 2) @default(0)
-  expensesCash         Decimal  @db.Decimal(10, 2) @default(0)
-  paymentsReceivedCash Decimal  @db.Decimal(10, 2) @default(0)
-  paymentsReceivedUpi  Decimal  @db.Decimal(10, 2) @default(0)
-  supplierPaymentsCash Decimal  @db.Decimal(10, 2) @default(0)
-  supplierPaymentsUpi  Decimal  @db.Decimal(10, 2) @default(0)
+  salesCash            Decimal  @default(0) @db.Decimal(10, 2)
+  salesUpi             Decimal  @default(0) @db.Decimal(10, 2)
+  expensesCash         Decimal  @default(0) @db.Decimal(10, 2)
+  paymentsReceivedCash Decimal  @default(0) @db.Decimal(10, 2)
+  paymentsReceivedUpi  Decimal  @default(0) @db.Decimal(10, 2)
+  supplierPaymentsCash Decimal  @default(0) @db.Decimal(10, 2)
+  supplierPaymentsUpi  Decimal  @default(0) @db.Decimal(10, 2)
   closingCash          Decimal  @db.Decimal(10, 2)
   difference           Decimal  @db.Decimal(10, 2)
   notes                String?
@@ -637,8 +658,8 @@ model DailyClosing {
   ownerSignature       String?
   ownerUserId          String?
   ownerUser            User?    @relation("DailyClosingOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
-  withdrawals          Decimal  @db.Decimal(10, 2) @default(0)
-  userId               String?  // Closed By
+  withdrawals          Decimal  @default(0) @db.Decimal(10, 2)
+  userId               String? // Closed By
   user                 User?    @relation("DailyClosingClosedByUser", fields: [userId], references: [id], onDelete: SetNull)
   isReversed           Boolean  @default(false)
   reversalReason       String?
@@ -655,8 +676,10 @@ model DailyClosing {
 
 model AuditLog {
   id        String   @id @default(uuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  shopId    String?
+  shop      Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
   action    String
   details   String?
   device    String?
@@ -668,6 +691,7 @@ model AuditLog {
   createdAt DateTime @default(now())
 
   @@index([userId])
+  @@index([shopId])
   @@map("audit_logs")
 }
 
@@ -675,14 +699,14 @@ model BackupHistory {
   id            String   @id @default(uuid())
   shopId        String
   shop          Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  backupType    String   // 'COMPLETE', 'PRODUCTS', etc.
-  backupVersion String   // e.g. '1.0'
-  schemaVersion String   // e.g. '1.0'
-  appVersion    String   // e.g. '1.0.0'
+  backupType    String // 'COMPLETE', 'PRODUCTS', etc.
+  backupVersion String // e.g. '1.0'
+  schemaVersion String // e.g. '1.0'
+  appVersion    String // e.g. '1.0.0'
   filename      String
   fileSize      Int
-  status        String   // 'SUCCESS', 'FAILED'
-  duration      Int      // duration in milliseconds
+  status        String // 'SUCCESS', 'FAILED'
+  duration      Int // duration in milliseconds
   createdById   String?
   createdBy     User?    @relation("BackupCreatedByUser", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt     DateTime @default(now())
@@ -696,7 +720,7 @@ model RestoreLog {
   shopId          String
   shop            Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
   backupHistoryId String?
-  status          String   // 'SUCCESS', 'FAILED'
+  status          String // 'SUCCESS', 'FAILED'
   error           String?
   restoredById    String?
   restoredBy      User?    @relation("RestorePerformedByUser", fields: [restoredById], references: [id], onDelete: SetNull)
@@ -710,11 +734,11 @@ model ExportHistory {
   id          String   @id @default(uuid())
   shopId      String
   shop        Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  module      String   // 'PRODUCTS', 'CUSTOMERS', etc.
-  format      String   // 'CSV', 'EXCEL', 'JSON'
+  module      String // 'PRODUCTS', 'CUSTOMERS', etc.
+  format      String // 'CSV', 'EXCEL', 'JSON'
   filename    String
   fileSize    Int?
-  status      String   // 'PENDING', 'SUCCESS', 'FAILED'
+  status      String // 'PENDING', 'SUCCESS', 'FAILED'
   progress    Int      @default(0)
   createdById String?
   createdBy   User?    @relation("ExportCreatedByUser", fields: [createdById], references: [id], onDelete: SetNull)
@@ -722,4 +746,183 @@ model ExportHistory {
 
   @@index([shopId])
   @@map("export_history")
+}
+
+enum AdminRole {
+  SUPER_ADMIN
+  SUPPORT
+  BILLING
+  SALES
+  READ_ONLY
+}
+
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  EXPIRED
+  SUSPENDED
+}
+
+enum SupportTicketStatus {
+  OPEN
+  IN_PROGRESS
+  CLOSED
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum BillingPeriod {
+  MONTHLY
+  YEARLY
+  LIFETIME
+}
+
+model Plan {
+  id                  String                @id @default(uuid())
+  name                String                @unique
+  price               Decimal               @db.Decimal(10, 2)
+  billingPeriod       BillingPeriod         @default(MONTHLY)
+  isActive            Boolean               @default(true)
+  deletedAt           DateTime?
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+  features            PlanFeature[]
+  subscriptions       Subscription[]
+  subscriptionHistory SubscriptionHistory[]
+
+  @@map("plans")
+}
+
+model Feature {
+  id          String        @id @default(uuid())
+  code        String        @unique // e.g. "MOBILE_APP", "ADVANCED_REPORTS"
+  name        String
+  description String?
+  deletedAt   DateTime?
+  planLinks   PlanFeature[]
+
+  @@map("features")
+}
+
+model PlanFeature {
+  id         String  @id @default(uuid())
+  planId     String
+  plan       Plan    @relation(fields: [planId], references: [id], onDelete: Cascade)
+  featureId  String
+  feature    Feature @relation(fields: [featureId], references: [id], onDelete: Cascade)
+  enabled    Boolean @default(false)
+  limitType  String // "PRODUCTS", "USERS", "BRANCHES", "API_CALLS", "BACKUPS"
+  limitValue Int     @default(0)
+
+  @@unique([planId, featureId])
+  @@map("plan_features")
+}
+
+model Subscription {
+  id          String             @id @default(uuid())
+  shopId      String             @unique
+  shop        Shop               @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  planId      String
+  plan        Plan               @relation(fields: [planId], references: [id])
+  status      SubscriptionStatus @default(TRIAL)
+  startDate   DateTime           @default(now())
+  endDate     DateTime
+  trialEndsAt DateTime?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  @@map("subscriptions")
+}
+
+model SubscriptionHistory {
+  id              String             @id @default(uuid())
+  shopId          String
+  shop            Shop               @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  planId          String
+  plan            Plan               @relation(fields: [planId], references: [id])
+  status          SubscriptionStatus
+  startDate       DateTime
+  endDate         DateTime
+  changedByUserId String?
+  changedByUser   User?              @relation("SubscriptionModifier", fields: [changedByUserId], references: [id])
+  reason          String? // "Trial expired", "Manual upgrade", "Payment received", etc.
+  changedAt       DateTime           @default(now())
+
+  @@map("subscription_history")
+}
+
+model SupportTicket {
+  id               String                 @id @default(uuid())
+  shopId           String
+  shop             Shop                   @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  userId           String
+  user             User                   @relation("CreatedTickets", fields: [userId], references: [id], onDelete: Cascade)
+  title            String
+  status           SupportTicketStatus    @default(OPEN)
+  priority         TicketPriority         @default(LOW)
+  assignedToUserId String?
+  assignedTo       User?                  @relation("AssignedTickets", fields: [assignedToUserId], references: [id])
+  deletedAt        DateTime?
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+  messages         SupportTicketMessage[]
+
+  @@map("support_tickets")
+}
+
+model SupportTicketMessage {
+  id        String        @id @default(uuid())
+  ticketId  String
+  ticket    SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  message   String        @db.Text
+  createdAt DateTime      @default(now())
+
+  @@map("support_ticket_messages")
+}
+
+model Announcement {
+  id        String   @id @default(uuid())
+  title     String
+  message   String   @db.Text
+  published Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@map("announcements")
+}
+
+model AppVersion {
+  id                   String   @id @default(uuid())
+  version              String   @unique
+  minimumMobileVersion String
+  forceUpdate          Boolean  @default(false)
+  releaseNotes         String?  @db.Text
+  createdAt            DateTime @default(now())
+
+  @@map("app_versions")
+}
+
+enum NotificationStatus {
+  UNREAD
+  READ
+  ARCHIVED
+}
+
+model Notification {
+  id        String             @id @default(uuid())
+  shopId    String
+  shop      Shop               @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  title     String
+  message   String             @db.Text
+  type      String
+  status    NotificationStatus @default(UNREAD)
+  readAt    DateTime?
+  createdAt DateTime           @default(now())
+
+  @@map("notifications")
 }

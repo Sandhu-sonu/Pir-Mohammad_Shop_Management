@@ -10,6 +10,41 @@ const SCHEMA_VERSION = '1.0';
 const APP_VERSION = '1.0.0';
 
 export class BackupService {
+  private static driver: BackupStorageDriver | null = null;
+
+  private static getDriver(): BackupStorageDriver {
+    if (!this.driver) {
+      this.driver = new LocalDiskBackupDriver();
+    }
+    return this.driver;
+  }
+
+  static setDriver(customDriver: BackupStorageDriver) {
+    this.driver = customDriver;
+  }
+
+  static async triggerScheduledBackup(shopId: string, userId: string): Promise<{ success: boolean; backupId?: string; error?: string }> {
+    try {
+      const history = await this.createBackup(shopId, userId, 'Scheduled daily backup');
+      const backupDir = this.getBackupDir();
+      const tempPath = path.join(backupDir, history.filename);
+
+      // Verify the generated JSON file
+      const driver = this.getDriver();
+      const verifyRes = await driver.verify(history.id, tempPath);
+      if (!verifyRes.success) {
+        return { success: false, error: `Verification failed: ${verifyRes.error}` };
+      }
+
+      // Save via driver
+      await driver.save(history.id, tempPath);
+
+      return { success: true, backupId: history.id };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
   static getBackupDir() {
     fs.mkdirSync(BACKUP_DIR, { recursive: true });
     return BACKUP_DIR;
@@ -442,3 +477,114 @@ export class BackupService {
     }
   }
 }
+
+export interface BackupStorageDriver {
+  save(backupId: string, sourcePath: string): Promise<boolean>;
+  restore(backupId: string, destinationPath: string): Promise<boolean>;
+  list(): Promise<string[]>;
+  delete(backupId: string): Promise<boolean>;
+  verify(backupId: string, filePath: string): Promise<{ success: boolean; error?: string; details?: any }>;
+}
+
+export class LocalDiskBackupDriver implements BackupStorageDriver {
+  private backupDir: string;
+
+  constructor() {
+    this.backupDir = path.join(process.cwd(), 'storage', 'backups');
+    if (!fs.existsSync(this.backupDir)) {
+      fs.mkdirSync(this.backupDir, { recursive: true });
+    }
+  }
+
+  async save(backupId: string, sourcePath: string): Promise<boolean> {
+    try {
+      const dest = path.join(this.backupDir, `${backupId}.json`);
+      if (sourcePath !== dest) {
+        fs.copyFileSync(sourcePath, dest);
+      }
+      return true;
+    } catch (err) {
+      console.error('LocalDiskBackupDriver save error:', err);
+      return false;
+    }
+  }
+
+  async restore(backupId: string, destinationPath: string): Promise<boolean> {
+    try {
+      const src = path.join(this.backupDir, `${backupId}.json`);
+      if (!fs.existsSync(src)) return false;
+      fs.copyFileSync(src, destinationPath);
+      return true;
+    } catch (err) {
+      console.error('LocalDiskBackupDriver restore error:', err);
+      return false;
+    }
+  }
+
+  async list(): Promise<string[]> {
+    try {
+      const files = fs.readdirSync(this.backupDir);
+      return files.filter(f => f.endsWith('.json')).map(f => f.replace('.json', ''));
+    } catch {
+      return [];
+    }
+  }
+
+  async delete(backupId: string): Promise<boolean> {
+    try {
+      const filePath = path.join(this.backupDir, `${backupId}.json`);
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async verify(backupId: string, filePath: string): Promise<{ success: boolean; error?: string; details?: any }> {
+    try {
+      if (!fs.existsSync(filePath)) {
+        return { success: false, error: 'Backup file does not exist.' };
+      }
+
+      const stats = fs.statSync(filePath);
+      if (stats.size < 50) {
+        return { success: false, error: `File size too small: ${stats.size} bytes.` };
+      }
+
+      const content = fs.readFileSync(filePath, 'utf-8');
+      const payload = JSON.parse(content);
+
+      if (!payload.backupVersion || !payload.shopId || !payload.data) {
+        return { success: false, error: 'Invalid backup structure. Missing backupVersion, shopId, or data.' };
+      }
+
+      const requiredKeys = ['categories', 'products', 'sales', 'settings'];
+      const missingKeys = requiredKeys.filter(key => !(key in payload.data));
+
+      if (missingKeys.length > 0) {
+        return { success: false, error: `Missing tables keys: ${missingKeys.join(', ')}` };
+      }
+
+      // Check settings exist
+      if (!payload.data.settings) {
+        return { success: false, error: 'Backup is missing shop Settings record.' };
+      }
+
+      return {
+        success: true,
+        details: {
+          fileSize: stats.size,
+          backupVersion: payload.backupVersion,
+          timestamp: payload.timestamp,
+          productsCount: payload.data.products?.length || 0,
+          salesCount: payload.data.sales?.length || 0
+        }
+      };
+    } catch (err: any) {
+      return { success: false, error: `JSON Parse error: ${err.message}` };
+    }
+  }
+}
+

@@ -1,10 +1,12 @@
 'use server';
 
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { prisma } from '../../db/prisma';
 import { Role, BusinessType } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { seedDefaultCategories } from './categories';
+import { verifyToken } from '../jwt';
+import { RateLimiter } from '../RateLimiter';
 
 export interface UserSession {
   userId: string;
@@ -18,6 +20,21 @@ export interface UserSession {
 }
 
 export async function login(mobileOrUsername: string, passwordInput: string): Promise<{ success: boolean; error?: string }> {
+  let clientIp = '127.0.0.1';
+  try {
+    const headerList = await headers();
+    clientIp = headerList.get('x-forwarded-for') || headerList.get('x-real-ip') || '127.0.0.1';
+  } catch {}
+
+  // Limit login attempts to 10 requests per minute per IP + username combo
+  const isRateAllowed = RateLimiter.isAllowed(`login:${clientIp}:${mobileOrUsername}`, 10, 60 * 1000);
+  if (!isRateAllowed) {
+    return {
+      success: false,
+      error: 'ਬਹੁਤ ਸਾਰੀਆਂ ਲੌਗਇਨ ਕੋਸ਼ਿਸ਼ਾਂ। ਕਿਰਪਾ ਕਰਕੇ ਇੱਕ ਮਿੰਟ ਬਾਅਦ ਕੋਸ਼ਿਸ਼ ਕਰੋ (Too many login attempts. Please wait 1 minute.)'
+    };
+  }
+
   // Hardcoded default "admin" / "admin123" support as fallback
   if (mobileOrUsername === 'admin' && passwordInput === 'admin123') {
     // Find the first shop in the system or create one if none exists
@@ -109,6 +126,21 @@ export async function login(mobileOrUsername: string, passwordInput: string): Pr
     return { success: false, error: 'ਗਲਤ ਯੂਜ਼ਰਨੇਮ ਜਾਂ ਪਾਸਵਰਡ (Invalid credentials)' };
   }
 
+  // Extract client metadata for security auditing
+  let clientUa = 'Unknown';
+  try {
+    const headerList = await headers();
+    clientUa = headerList.get('user-agent') || 'Unknown';
+  } catch {}
+
+  // Check lockout condition
+  if (user.lockedUntil && new Date() < new Date(user.lockedUntil)) {
+    return {
+      success: false,
+      error: 'ਬਾਰ-ਬਾਰ ਗਲਤ ਲੌਗਇਨ ਕਾਰਨ ਖਾਤਾ ਅਸਥਾਈ ਤੌਰ ਤੇ ਬੰਦ ਹੈ। (Account locked due to multiple failed logins. Please try again later.)'
+    };
+  }
+
   // Password Hashing Verification
   let isMatch = false;
   try {
@@ -128,8 +160,52 @@ export async function login(mobileOrUsername: string, passwordInput: string): Pr
   }
 
   if (!isMatch) {
+    const newAttempts = user.failedAttempts + 1;
+    const lockedUntil = newAttempts >= 5 ? new Date(Date.now() + 15 * 60 * 1000) : null;
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        failedAttempts: newAttempts,
+        lockedUntil
+      }
+    });
+
+    // Log detailed security failed attempt to AuditLog
+    await prisma.auditLog.create({
+      data: {
+        shopId: user.shopId,
+        userId: user.id,
+        action: 'Failed Login Attempt',
+        module: 'Auth',
+        entity: 'User',
+        details: `Failed login. Username: ${mobileOrUsername}. IP: ${clientIp}. User-Agent: ${clientUa}. Attempts: ${newAttempts}.${lockedUntil ? ' ACCOUNT LOCKED FOR 15 MINUTES.' : ''}`
+      }
+    });
+
     return { success: false, error: 'ਗਲਤ ਯੂਜ਼ਰਨੇਮ ਜਾਂ ਪਾਸਵਰਡ (Invalid credentials)' };
   }
+
+  // Reset failed attempts on success
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      failedAttempts: 0,
+      lockedUntil: null
+    }
+  });
+
+  // Log successful login audit log
+  await prisma.auditLog.create({
+    data: {
+      shopId: user.shopId,
+      userId: user.id,
+      action: 'Login',
+      module: 'Auth',
+      entity: 'User',
+      details: `Successful login. IP: ${clientIp}. User-Agent: ${clientUa}`
+    }
+  });
 
   const sessionData: UserSession = {
     userId: user.id,
@@ -160,13 +236,52 @@ export async function logout(): Promise<{ success: boolean }> {
 }
 
 export async function getCurrentUser(): Promise<UserSession | null> {
-  const cookieStore = await cookies();
-  const sessionCookie = cookieStore.get('session');
-  if (!sessionCookie || !sessionCookie.value) {
-    return null;
+  // 1. Try Authorization header first
+  try {
+    const headersList = await headers();
+    const authHeader = headersList.get('authorization');
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.substring(7);
+      const session = await verifyToken(token);
+      if (session) {
+        const dbUser = await prisma.user.findUnique({
+          where: { id: session.userId },
+          select: {
+            id: true,
+            shopId: true,
+            mobile: true,
+            shop: {
+              select: {
+                name: true,
+                settings: {
+                  select: { printerType: true }
+                }
+              }
+            }
+          },
+        });
+        if (dbUser) {
+          return {
+            ...session,
+            mobile: dbUser.mobile,
+            shopName: dbUser.shop.name,
+            printerType: dbUser.shop.settings?.printerType || 'THERMAL_80',
+          };
+        }
+      }
+    }
+  } catch (err) {
+    // Ignore error if headers() is unavailable in static generation contexts
   }
 
+  // 2. Fall back to session cookie
   try {
+    const cookieStore = await cookies();
+    const sessionCookie = cookieStore.get('session');
+    if (!sessionCookie || !sessionCookie.value) {
+      return null;
+    }
+
     const session = JSON.parse(sessionCookie.value) as UserSession;
 
     // Validate user exists in database to prevent stale session desyncs (e.g. after DB reset)
@@ -176,9 +291,11 @@ export async function getCurrentUser(): Promise<UserSession | null> {
         id: true,
         shopId: true,
         mobile: true,
+        role: true,
         shop: {
           select: {
             name: true,
+            businessType: true,
             settings: {
               select: { printerType: true }
             }
@@ -193,13 +310,82 @@ export async function getCurrentUser(): Promise<UserSession | null> {
       return null;
     }
 
+    let activeShopId = dbUser.shopId;
+    let activeRole = dbUser.role;
+    let activeName = session.name;
+    let activeShopName = dbUser.shop.name;
+    let activeBusinessType = dbUser.shop.businessType;
+    let activePrinterType = dbUser.shop.settings?.printerType || 'THERMAL_80';
+
+    if (dbUser.role === Role.SUPER_ADMIN) {
+      const impCookie = cookieStore.get('impersonatedShopId');
+      if (impCookie && impCookie.value) {
+        const targetShop = await prisma.shop.findUnique({
+          where: { id: impCookie.value },
+          select: {
+            name: true,
+            businessType: true,
+            settings: { select: { printerType: true } }
+          }
+        });
+        if (targetShop) {
+          activeShopId = impCookie.value;
+          activeRole = Role.VIEW_ONLY; // Force read-only troubleshoot mode
+          activeName = `Super Admin (Impersonating)`;
+          activeShopName = targetShop.name;
+          activeBusinessType = targetShop.businessType;
+          activePrinterType = targetShop.settings?.printerType || 'THERMAL_80';
+        }
+      }
+    }
+
     return {
-      ...session,
+      userId: dbUser.id,
+      name: activeName,
+      role: activeRole,
+      shopId: activeShopId,
+      businessType: activeBusinessType,
       mobile: dbUser.mobile,
-      shopName: dbUser.shop.name,
-      printerType: dbUser.shop.settings?.printerType || 'THERMAL_80',
+      shopName: activeShopName,
+      printerType: activePrinterType,
     };
   } catch {
     return null;
+  }
+}
+
+export async function impersonateShopAction(targetShopId: string | null): Promise<{ success: boolean }> {
+  try {
+    const cookieStore = await cookies();
+    const sessionCookie = cookieStore.get('session');
+    if (!sessionCookie || !sessionCookie.value) {
+      return { success: false };
+    }
+
+    const session = JSON.parse(sessionCookie.value) as UserSession;
+    const user = await prisma.user.findUnique({
+      where: { id: session.userId },
+      select: { role: true }
+    });
+
+    if (!user || user.role !== Role.SUPER_ADMIN) {
+      return { success: false };
+    }
+
+    if (targetShopId) {
+      cookieStore.set('impersonatedShopId', targetShopId, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 60 * 60 * 2, // 2 hours troubleshoot window
+      });
+    } else {
+      cookieStore.delete('impersonatedShopId');
+    }
+
+    return { success: true };
+  } catch (err) {
+    console.error('Impersonate Shop Action Error:', err);
+    return { success: false };
   }
 }

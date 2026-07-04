@@ -288,7 +288,7 @@ export class ProductImportService {
 
             importedCount++;
           }
-        });
+        }, { timeout: 60000 });
       } catch (err: any) {
         failedCount++;
         errors.push({

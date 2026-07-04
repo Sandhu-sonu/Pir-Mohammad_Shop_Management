@@ -13,7 +13,20 @@ export default async function SettingsPage() {
 
   const shop = await prisma.shop.findUnique({
     where: { id: user.shopId },
-    include: { settings: true },
+    include: {
+      settings: true,
+      subscription: {
+        include: {
+          plan: {
+            include: {
+              features: {
+                include: { feature: true }
+              }
+            }
+          }
+        }
+      }
+    },
   });
 
   if (!shop) {

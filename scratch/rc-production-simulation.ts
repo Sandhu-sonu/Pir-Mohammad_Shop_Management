@@ -41,7 +41,7 @@ Module.prototype.require = function (id) {
       }
     };
   }
-  return originalRequire.apply(this, arguments);
+  return originalRequire.apply(this, arguments as any);
 };
 
 // 2. Now import database and other services safely

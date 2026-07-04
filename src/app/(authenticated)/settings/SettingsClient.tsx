@@ -48,6 +48,24 @@ interface SettingsClientProps {
       autoSuggestPunjabi?: boolean;
       autoSuggestEnglish?: boolean;
     } | null;
+    subscription?: {
+      status: string;
+      startDate: string;
+      endDate: string;
+      trialEndsAt: string | null;
+      plan: {
+        name: string;
+        price: any;
+        billingPeriod: string;
+        features: Array<{
+          id: string;
+          enabled: boolean;
+          limitType: string;
+          limitValue: number;
+          feature: { name: string; code: string; }
+        }>
+      }
+    } | null;
   };
   role: string;
 }
@@ -298,6 +316,17 @@ export default function SettingsClient({ shop, role }: SettingsClientProps) {
           >
             <HeartPulse className="w-4 h-4" />
             System Health
+          </button>
+          <button
+            onClick={() => setActiveTab('subscription' as any)}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
+              activeTab === ('subscription' as any)
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'text-slate-555 hover:bg-slate-50 dark:hover:bg-slate-850'
+            }`}
+          >
+            <span className="w-4 h-4 text-center">💳</span>
+            Subscription / ਪਲਾਨ
           </button>
         </div>
       )}
@@ -807,6 +836,74 @@ export default function SettingsClient({ shop, role }: SettingsClientProps) {
       {activeTab === 'backup' && isOwnerOrManager && <BackupRestoreTab />}
       {activeTab === 'import_export' && isOwnerOrManager && <ImportExportTab />}
       {activeTab === 'health' && isOwnerOrManager && <SystemHealthWidget />}
+      {activeTab === ('subscription' as any) && (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm p-6 space-y-6">
+          <div className="flex items-center gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
+            <div className="p-2.5 rounded-xl bg-blue-50 dark:bg-blue-950/20 text-blue-650 font-bold">
+              <span>💳</span>
+            </div>
+            <div>
+              <h2 className="text-lg font-bold">ਸਬਸਕ੍ਰਿਪਸ਼ਨ ਅਤੇ ਪਲਾਨ (SaaS Subscription)</h2>
+              <p className="text-xs text-slate-550 dark:text-slate-400">View active plan limits and billing cycles</p>
+            </div>
+          </div>
+
+          {shop.subscription ? (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-100 dark:border-slate-800">
+                  <p className="text-xs text-slate-550 uppercase font-bold">Current Plan</p>
+                  <p className="text-lg font-black text-slate-800 dark:text-white mt-1">
+                    {shop.subscription.plan.name}
+                  </p>
+                </div>
+                <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-100 dark:border-slate-800">
+                  <p className="text-xs text-slate-555 uppercase font-bold">Status</p>
+                  <span className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-bold mt-1.5 ${
+                    shop.subscription.status === 'ACTIVE' ? 'bg-green-950 text-green-400' : 'bg-blue-950 text-blue-400'
+                  }`}>
+                    {shop.subscription.status}
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-100 dark:border-slate-800">
+                  <p className="text-xs text-slate-555 uppercase font-bold">Days Remaining</p>
+                  <p className="text-lg font-black text-slate-800 dark:text-white mt-1">
+                    {Math.max(0, Math.ceil((new Date(shop.subscription.endDate).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)))} Days
+                  </p>
+                </div>
+                <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-100 dark:border-slate-800">
+                  <p className="text-xs text-slate-555 uppercase font-bold">Renewal Date</p>
+                  <p className="text-sm font-bold text-slate-800 dark:text-white mt-1">
+                    {new Date(shop.subscription.endDate).toLocaleDateString()}
+                  </p>
+                </div>
+              </div>
+
+              <div className="border-t border-slate-100 dark:border-slate-800 pt-4 space-y-3">
+                <p className="text-xs text-slate-555 font-bold uppercase tracking-wider">Features Enabled in Plan:</p>
+                {shop.subscription.plan.features.map((pf: any) => (
+                  <div key={pf.id} className="flex justify-between items-center text-sm">
+                    <span className="text-slate-400">{pf.feature.name}</span>
+                    <span className={`text-xs font-bold ${pf.enabled ? 'text-green-400' : 'text-slate-655'}`}>
+                      {pf.enabled ? (
+                        pf.limitValue > 0 ? `Limit: ${pf.limitValue} (${pf.limitType})` : 'Unlimited ✔'
+                      ) : 'Disabled ✖'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-slate-500 text-center py-6">
+              No active subscription found. Please contact support.
+            </p>
+          )}
+        </div>
+      )}
+
 
       {/* Business Type Category Import Confirmation Modal */}
       {showImportConfirm && (
