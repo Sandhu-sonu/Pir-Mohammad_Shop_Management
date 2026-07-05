@@ -145,7 +145,7 @@ export async function login(mobileOrUsername: string, passwordInput: string): Pr
   let isMatch = false;
   try {
     isMatch = await bcrypt.compare(passwordInput, user.password);
-  } catch (err) {
+  } catch {
     // Ignore comparison throw
   }
 
@@ -270,24 +270,20 @@ export async function getCurrentUser(): Promise<UserSession | null> {
         }
       }
     }
-  } catch (err) {
+  } catch {
     // Ignore error if headers() is unavailable in static generation contexts
   }
 
   // 2. Fall back to session cookie
   try {
     const cookieStore = await cookies();
-const sessionCookie = cookieStore.get('session');
+    const sessionCookie = cookieStore.get('session');
 
-console.log("=== SESSION DEBUG ===");
-console.log("NODE_ENV:", process.env.NODE_ENV);
-console.log("COOKIE:", sessionCookie?.value);
     if (!sessionCookie || !sessionCookie.value) {
       return null;
     }
 
     const session = JSON.parse(sessionCookie.value) as UserSession;
-    console.log("SESSION:", session);
 
     // Validate user exists in database to prevent stale session desyncs (e.g. after DB reset)
     const dbUser = await prisma.user.findUnique({
