@@ -278,12 +278,13 @@ export async function getCurrentUser(): Promise<UserSession | null> {
   try {
     const cookieStore = await cookies();
     const sessionCookie = cookieStore.get('session');
-
+console.log("SESSION COOKIE:", sessionCookie);
     if (!sessionCookie || !sessionCookie.value) {
       return null;
     }
 
     const session = JSON.parse(sessionCookie.value) as UserSession;
+    console.log("PARSED SESSION:", session);
 
     // Validate user exists in database to prevent stale session desyncs (e.g. after DB reset)
     const dbUser = await prisma.user.findUnique({
@@ -304,7 +305,7 @@ export async function getCurrentUser(): Promise<UserSession | null> {
         }
       },
     });
-
+console.log("DB USER:", dbUser);
     if (!dbUser) {
       // Clear cookie if user no longer exists
       cookieStore.delete('session');
@@ -350,9 +351,10 @@ export async function getCurrentUser(): Promise<UserSession | null> {
       shopName: activeShopName,
       printerType: activePrinterType,
     };
-  } catch {
-    return null;
-  }
+} catch (err) {
+  console.error("getCurrentUser() failed:", err);
+  return null;
+}
 }
 
 export async function impersonateShopAction(targetShopId: string | null): Promise<{ success: boolean }> {
