@@ -33,13 +33,25 @@ export default function LoginForm() {
     setLoading(true);
     setError(null);
     try {
-      const res = await login(data.mobile, data.password);
+      /*const res = await login(data.mobile, data.password);
       if (res.success) {
         router.refresh();
         router.push('/dashboard');
       } else {
         setError(res.error || 'Login failed');
-      }
+      }*/
+     const res = await login(data.mobile, data.password);
+
+console.log("LOGIN RESULT:", res);
+
+if (res.success) {
+  console.log("Redirecting to dashboard...");
+  router.refresh();
+  router.push('/dashboard');
+} else {
+  console.log("Login failed:", res.error);
+  setError(res.error || "Login failed");
+}
     } catch {
       setError('Connection error. Please try again.');
     } finally {
