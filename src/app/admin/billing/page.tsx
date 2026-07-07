@@ -162,7 +162,11 @@ export default async function AdminBillingPage() {
           createdAt: l.createdAt
         }))}
         shops={shops}
-        plans={plans}
+        plans={plans.map(p => ({
+          id: p.id,
+          name: p.name,
+          price: p.price.toNumber()
+        }))}
         mrr={mrr}
         arr={arr}
         totalRevenue={totalRevenue}
