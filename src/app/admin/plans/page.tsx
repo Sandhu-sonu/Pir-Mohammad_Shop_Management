@@ -1,6 +1,7 @@
 import React from 'react';
 import { prisma } from '@/db/prisma';
 import { BillingPeriod } from '@prisma/client';
+import Link from 'next/link';
 
 export default async function AdminPlansPage() {
   const plans = await prisma.plan.findMany({
@@ -45,9 +46,12 @@ export default async function AdminPlansPage() {
               </div>
             </div>
 
-            <button className="w-full bg-gray-800 hover:bg-gray-700 text-white font-bold py-2.5 rounded-xl text-xs mt-6 transition duration-200 border border-gray-700">
-              Edit Plan Configurations (Configuration Only)
-            </button>
+            <Link
+              href={`/admin/plans/${p.id}`}
+              className="w-full text-center bg-gray-800 hover:bg-gray-700 text-white font-bold py-2.5 rounded-xl text-xs mt-6 transition duration-200 border border-gray-700 block"
+            >
+              Edit Plan Configurations / ਸੰਰਚਨਾ ਬਦਲੋ
+            </Link>
           </div>
         ))}
       </div>

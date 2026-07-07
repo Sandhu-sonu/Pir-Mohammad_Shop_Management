@@ -58,6 +58,9 @@ export async function login(mobileOrUsername: string, passwordInput: string): Pr
 
   // Hardcoded default "admin" / "admin123" support as fallback
   if (mobileOrUsername === 'admin' && passwordInput === 'admin123') {
+    if (process.env.NODE_ENV === 'production') {
+      return { success: false, error: 'ਗਲਤ ਯੂਜ਼ਰਨੇਮ ਜਾਂ ਪਾਸਵਰਡ (Invalid credentials)' };
+    }
     // Find the first shop in the system or create one if none exists
     let shop = await prisma.shop.findFirst({
       include: { settings: true },

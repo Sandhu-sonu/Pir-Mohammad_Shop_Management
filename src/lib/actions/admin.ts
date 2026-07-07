@@ -2,7 +2,7 @@
 
 import { prisma } from '@/db/prisma';
 import { getCurrentUser } from './auth';
-import { Role, SupportTicketStatus } from '@prisma/client';
+import { Role, SupportTicketStatus, BillingPeriod } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 
 // Helper to assert current user is indeed a Super Admin
@@ -162,6 +162,67 @@ export async function deleteShopAction(shopId: string): Promise<{ success: boole
     return { success: true };
   } catch (err: any) {
     console.error(err);
+    return { success: false, error: err.message };
+  }
+}
+
+export async function updatePlanAction(
+  planId: string,
+  data: {
+    name: string;
+    price: number;
+    billingPeriod: BillingPeriod;
+    features: {
+      featureId: string;
+      enabled: boolean;
+      limitValue: number;
+    }[];
+  }
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const admin = await assertAdmin();
+
+    await prisma.$transaction(async (tx) => {
+      // 1. Update Plan Details
+      await tx.plan.update({
+        where: { id: planId },
+        data: {
+          name: data.name,
+          price: data.price,
+          billingPeriod: data.billingPeriod
+        }
+      });
+
+      // 2. Update each PlanFeature mapping
+      for (const pf of data.features) {
+        await tx.planFeature.update({
+          where: {
+            planId_featureId: {
+              planId,
+              featureId: pf.featureId
+            }
+          },
+          data: {
+            enabled: pf.enabled,
+            limitValue: pf.limitValue
+          }
+        });
+      }
+
+      // 3. Log the change to audit logs
+      await tx.auditLog.create({
+        data: {
+          action: 'Updated SaaS Plan Configuration',
+          module: 'SaaS',
+          entity: 'Plan',
+          details: `Plan ID ${planId} price and feature limits updated by Admin ${admin.id}.`
+        }
+      });
+    });
+
+    return { success: true };
+  } catch (err: any) {
+    console.error('updatePlanAction Error:', err);
     return { success: false, error: err.message };
   }
 }
