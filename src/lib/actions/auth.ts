@@ -61,8 +61,9 @@ export async function login(mobileOrUsername: string, passwordInput: string): Pr
     if (process.env.NODE_ENV === 'production') {
       return { success: false, error: 'ਗਲਤ ਯੂਜ਼ਰਨੇਮ ਜਾਂ ਪਾਸਵਰਡ (Invalid credentials)' };
     }
-    // Find the first shop in the system or create one if none exists
+    // Find the first shop in the system (excluding admin) or create one if none exists
     let shop = await prisma.shop.findFirst({
+      where: { id: { not: 'admin-system-shop-id' } },
       include: { settings: true },
     });
     if (!shop) {
