@@ -301,19 +301,11 @@ export async function getCurrentUser(): Promise<UserSession | null> {
   try {
     const cookieStore = await cookies();
     const sessionCookie = cookieStore.get('session');
-const headersList = await headers();
-
-console.log("=================================");
-console.log("URL:", headersList.get("x-forwarded-uri"));
-console.log("HOST:", headersList.get("host"));
-console.log("COOKIE:", sessionCookie);
     if (!sessionCookie || !sessionCookie.value) {
       return null;
     }
 
-
     const session = JSON.parse(sessionCookie.value) as UserSession;
-    console.log("PARSED SESSION:", session);
 
     // Validate user exists in database to prevent stale session desyncs (e.g. after DB reset)
     const dbUser = await prisma.user.findUnique({
@@ -334,7 +326,6 @@ console.log("COOKIE:", sessionCookie);
         }
       },
     });
-console.log("DB USER:", dbUser);
     if (!dbUser) {
       // Clear cookie if user no longer exists
       cookieStore.delete('session');

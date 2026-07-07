@@ -141,7 +141,9 @@ model User {
   purchases         Purchase[]
   backupsCreated    BackupHistory[] @relation("BackupCreatedByUser")
   restoresPerformed RestoreLog[]    @relation("RestorePerformedByUser")
-  exportsCreated    ExportHistory[] @relation("ExportCreatedByUser")
+  exportsCreated           ExportHistory[]           @relation("ExportCreatedByUser")
+  subscriptionTransactions SubscriptionTransaction[]
+  approvedRefunds          Refund[]
 
   @@index([shopId])
 }
@@ -184,6 +186,9 @@ model Shop {
   supportTickets      SupportTicket[]
   notifications       Notification[]
   auditLogs           AuditLog[]
+  saasInvoices             SaaSInvoice[]
+  saasPayments             SaaSPayment[]
+  subscriptionTransactions SubscriptionTransaction[]
 
   @@map("shops")
 }
@@ -793,6 +798,8 @@ model Plan {
   features            PlanFeature[]
   subscriptions       Subscription[]
   subscriptionHistory SubscriptionHistory[]
+  subscriptionTransactions SubscriptionTransaction[]
+  saasInvoices SaaSInvoice[]
 
   @@map("plans")
 }
@@ -828,6 +835,7 @@ model Subscription {
   shop        Shop               @relation(fields: [shopId], references: [id], onDelete: Cascade)
   planId      String
   plan        Plan               @relation(fields: [planId], references: [id])
+  saasInvoices SaaSInvoice[]
   status      SubscriptionStatus @default(TRIAL)
   startDate   DateTime           @default(now())
   endDate     DateTime
@@ -926,3 +934,158 @@ model Notification {
 
   @@map("notifications")
 }
+
+enum SaaSInvoiceStatus {
+  DRAFT
+  PENDING
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+enum SaasPaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  REFUNDED
+}
+
+enum SubscriptionTransactionType {
+  UPGRADE
+  DOWNGRADE
+  RENEWAL
+  TRIAL_EXTENSION
+  CANCELLATION
+}
+
+enum RefundStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  FAILED
+}
+
+model SaaSInvoice {
+  id               String             @id @default(uuid())
+  invoiceNumber    String             @unique // e.g., INV-2026-000001
+  shopId           String
+  shop             Shop               @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  subscriptionId   String?
+  subscription     Subscription?      @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  planId           String
+  plan             Plan               @relation(fields: [planId], references: [id])
+  issueDate        DateTime           @default(now())
+  dueDate          DateTime
+  subtotal         Decimal            @db.Decimal(10, 2)
+  taxAmount        Decimal            @default(0) @db.Decimal(10, 2)
+  discountAmount   Decimal            @default(0) @db.Decimal(10, 2)
+  totalAmount      Decimal            @db.Decimal(10, 2)
+  currency         String             @default("INR")
+  status           SaaSInvoiceStatus  @default(PENDING)
+  pdfUrl           String?
+  notes            String?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  payments         SaaSPayment[]
+  paymentAttempts  SaaSPaymentAttempt[]
+  transactions     SubscriptionTransaction[]
+  refunds          Refund[]
+
+  @@index([shopId])
+  @@index([subscriptionId])
+  @@map("saas_invoices")
+}
+
+model SaaSPayment {
+  id               String            @id @default(uuid())
+  invoiceId        String
+  invoice          SaaSInvoice       @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  shopId           String
+  shop             Shop              @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  paymentDate      DateTime          @default(now())
+  amount           Decimal           @db.Decimal(10, 2)
+  paymentMethod    String            // e.g., CARD, UPI, BANK_TRANSFER
+  gateway          String            // e.g., STRIPE, RAZORPAY, MANUAL
+  gatewayReference String?           // ID returned by payment gateway
+  transactionId    String?           @unique
+  status           SaasPaymentStatus @default(SUCCESS)
+  remarks          String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  refunds          Refund[]
+
+  @@index([invoiceId])
+  @@index([shopId])
+  @@map("saas_payments")
+}
+
+model SaaSPaymentAttempt {
+  id               String        @id @default(uuid())
+  invoiceId        String
+  invoice          SaaSInvoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  gateway          String
+  requestPayload   String?       @db.Text
+  responsePayload  String?       @db.Text
+  responseCode     String?
+  status           String        // e.g., SUCCESS, FAILED
+  createdAt        DateTime      @default(now())
+
+  @@index([invoiceId])
+  @@map("saas_payment_attempts")
+}
+
+model SubscriptionTransaction {
+  id               String                      @id @default(uuid())
+  shopId           String
+  shop             Shop                        @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  invoiceId        String?
+  invoice          SaaSInvoice?                @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  type             SubscriptionTransactionType
+  planId           String
+  plan             Plan                        @relation(fields: [planId], references: [id])
+  startDate        DateTime
+  endDate          DateTime
+  amount           Decimal                     @db.Decimal(10, 2)
+  changedByUserId  String?
+  changedByUser    User?                       @relation(fields: [changedByUserId], references: [id])
+  notes            String?
+  createdAt        DateTime                    @default(now())
+
+  @@index([shopId])
+  @@index([invoiceId])
+  @@map("saas_subscription_transactions")
+}
+
+model Refund {
+  id               String       @id @default(uuid())
+  paymentId        String
+  payment          SaaSPayment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  invoiceId        String
+  invoice          SaaSInvoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  refundAmount     Decimal      @db.Decimal(10, 2)
+  refundReason     String?
+  approvedByUserId String?
+  approvedByUser   User?        @relation(fields: [approvedByUserId], references: [id])
+  gatewayReference String?
+  status           RefundStatus @default(PENDING)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@index([paymentId])
+  @@index([invoiceId])
+  @@map("saas_refunds")
+}
+
+model PaymentGatewayLog {
+  id               String   @id @default(uuid())
+  gateway          String
+  eventType        String?
+  payload          String   @db.Text
+  ip               String?
+  createdAt        DateTime @default(now())
+
+  @@map("payment_gateway_logs")
+}
+

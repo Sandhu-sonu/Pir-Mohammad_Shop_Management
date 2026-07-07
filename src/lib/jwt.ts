@@ -1,6 +1,11 @@
 import { SignJWT, jwtVerify } from 'jose';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-at-least-32-chars-long-123456';
+
+if (process.env.NODE_ENV === 'production' && (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'fallback-secret-at-least-32-chars-long-123456')) {
+  console.warn('[SECURITY WARNING] JWT_SECRET is not configured or uses a default fallback value in production!');
+}
+
 const secretKey = new TextEncoder().encode(JWT_SECRET);
 
 export async function signToken(payload: any): Promise<string> {

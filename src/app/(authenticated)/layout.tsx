@@ -12,13 +12,9 @@ export default async function AuthenticatedLayout({
 }) {
   const user = await getCurrentUser();
 
-console.log("=== AUTHENTICATED LAYOUT ===");
-console.log("USER:", user);
-
-if (!user) {
-  console.log("Redirecting to login because user is null");
-  redirect('/');
-}
+  if (!user) {
+    redirect('/');
+  }
 
   // 1. Redirection for Super Admin
   if (user.role === Role.SUPER_ADMIN) {

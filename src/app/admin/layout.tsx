@@ -59,6 +59,10 @@ export default async function AdminLayout({
               <span>🏪</span>
               <span>Tenant Shops / ਦੁਕਾਨਾਂ</span>
             </Link>
+            <Link href="/admin/billing" className="flex items-center space-x-3 text-sm text-gray-300 hover:text-white p-3 rounded-xl hover:bg-gray-800 transition duration-150">
+              <span>🧾</span>
+              <span>SaaS Billing / ਬਿਲਿੰਗ</span>
+            </Link>
             <Link href="/admin/plans" className="flex items-center space-x-3 text-sm text-gray-300 hover:text-white p-3 rounded-xl hover:bg-gray-800 transition duration-150">
               <span>💳</span>
               <span>Plans & Feature limits</span>

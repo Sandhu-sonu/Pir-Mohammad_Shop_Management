@@ -136,3 +136,33 @@ export async function addTicketMessageAction(ticketId: string, message: string) 
     return { success: false, error: err.message };
   }
 }
+
+export async function deleteShopAction(shopId: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const admin = await assertAdmin();
+
+    if (shopId === 'admin-system-shop-id') {
+      return { success: false, error: 'Cannot delete the system administrative tenant.' };
+    }
+
+    await prisma.shop.delete({
+      where: { id: shopId }
+    });
+
+    // Log action to global system audit logs
+    await prisma.auditLog.create({
+      data: {
+        action: 'Deleted Shop',
+        module: 'SaaS',
+        entity: 'Shop',
+        details: `Shop ID ${shopId} was permanently deleted by Admin ${admin.id}.`
+      }
+    });
+
+    return { success: true };
+  } catch (err: any) {
+    console.error(err);
+    return { success: false, error: err.message };
+  }
+}
+
