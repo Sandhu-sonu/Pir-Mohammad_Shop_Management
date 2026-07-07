@@ -101,22 +101,22 @@ export default async function AdminBillingPage() {
           id: inv.id,
           invoiceNumber: inv.invoiceNumber,
           shopId: inv.shopId,
-          shopName: inv.shop.name,
+          shopName: inv.shop?.name || 'N/A',
           issueDate: inv.issueDate,
           dueDate: inv.dueDate,
-          subtotal: inv.subtotal.toNumber(),
-          taxAmount: inv.taxAmount.toNumber(),
-          totalAmount: inv.totalAmount.toNumber(),
+          subtotal: inv.subtotal ? inv.subtotal.toNumber() : 0,
+          taxAmount: inv.taxAmount ? inv.taxAmount.toNumber() : 0,
+          totalAmount: inv.totalAmount ? inv.totalAmount.toNumber() : 0,
           status: inv.status,
           pdfUrl: inv.pdfUrl,
           notes: inv.notes
         }))}
         initialPayments={payments.map(p => ({
           id: p.id,
-          invoiceNumber: p.invoice.invoiceNumber,
-          shopName: p.shop.name,
+          invoiceNumber: p.invoice?.invoiceNumber || 'N/A',
+          shopName: p.shop?.name || 'N/A',
           paymentDate: p.paymentDate,
-          amount: p.amount.toNumber(),
+          amount: p.amount ? p.amount.toNumber() : 0,
           paymentMethod: p.paymentMethod,
           gateway: p.gateway,
           gatewayReference: p.gatewayReference || 'N/A',
@@ -125,9 +125,9 @@ export default async function AdminBillingPage() {
         }))}
         initialRefunds={refunds.map(r => ({
           id: r.id,
-          invoiceNumber: r.invoice.invoiceNumber,
-          originalAmount: r.payment.amount.toNumber(),
-          refundAmount: r.refundAmount.toNumber(),
+          invoiceNumber: r.invoice?.invoiceNumber || 'N/A',
+          originalAmount: r.payment?.amount ? r.payment.amount.toNumber() : 0,
+          refundAmount: r.refundAmount ? r.refundAmount.toNumber() : 0,
           refundReason: r.refundReason || 'N/A',
           status: r.status,
           gatewayReference: r.gatewayReference || 'N/A',
@@ -135,19 +135,19 @@ export default async function AdminBillingPage() {
         }))}
         initialTransactions={transactions.map(t => ({
           id: t.id,
-          shopName: t.shop.name,
-          planName: t.plan.name,
+          shopName: t.shop?.name || 'N/A',
+          planName: t.plan?.name || 'N/A',
           type: t.type,
           startDate: t.startDate,
           endDate: t.endDate,
-          amount: t.amount.toNumber(),
+          amount: t.amount ? t.amount.toNumber() : 0,
           notes: t.notes,
           createdAt: t.createdAt
         }))}
         initialAttempts={attempts.map(a => ({
           id: a.id,
-          invoiceNumber: a.invoice.invoiceNumber,
-          shopName: a.invoice.shop.name,
+          invoiceNumber: a.invoice?.invoiceNumber || 'N/A',
+          shopName: a.invoice?.shop?.name || 'N/A',
           gateway: a.gateway,
           status: a.status,
           responseCode: a.responseCode || 'N/A',
@@ -165,7 +165,7 @@ export default async function AdminBillingPage() {
         plans={plans.map(p => ({
           id: p.id,
           name: p.name,
-          price: p.price.toNumber()
+          price: p.price ? p.price.toNumber() : 0
         }))}
         mrr={mrr}
         arr={arr}
