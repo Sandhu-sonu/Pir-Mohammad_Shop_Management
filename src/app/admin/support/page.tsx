@@ -48,7 +48,7 @@ export default async function AdminSupportPage() {
               userName: m.user.name,
               userRole: m.user.role,
               message: m.message,
-              createdAt: m.createdAt
+              createdAt: m.createdAt.toISOString()
             }))
           }))}
           admins={admins}

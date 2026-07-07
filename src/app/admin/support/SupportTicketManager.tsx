@@ -10,7 +10,7 @@ interface MessageItem {
   userName: string;
   userRole: string;
   message: string;
-  createdAt: Date;
+  createdAt: string;
 }
 
 interface TicketItem {
@@ -81,7 +81,7 @@ export default function SupportTicketManager({ initialTickets, admins }: Support
                   userName: 'Support Agent',
                   userRole: 'SUPER_ADMIN',
                   message: replyMessage,
-                  createdAt: now
+                  createdAt: now.toISOString()
                 }
               ]
             };

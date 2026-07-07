@@ -157,7 +157,7 @@ export default async function AdminBillingPage() {
           id: l.id,
           gateway: l.gateway,
           eventType: l.eventType || 'N/A',
-          payload: JSON.stringify(l.payload),
+          payload: l.payload === null || l.payload === undefined ? "" : JSON.stringify(l.payload, null, 2),
           ip: l.ip || '127.0.0.1',
           createdAt: l.createdAt
         }))}
