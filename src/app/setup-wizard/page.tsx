@@ -10,6 +10,10 @@ export default async function SetupWizardPage() {
     redirect('/');
   }
 
+  if (user.role === 'SUPER_ADMIN') {
+    redirect('/admin');
+  }
+
   // Ensure they haven't already completed setup
   const productCount = await prisma.product.count({
     where: { shopId: user.shopId, isDeleted: false }
