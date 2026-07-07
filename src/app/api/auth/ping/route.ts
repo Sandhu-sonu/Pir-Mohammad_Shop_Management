@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
+import { getCookieSecureFlag } from '@/lib/actions/auth';
 
 export async function GET() {
   try {
@@ -7,10 +8,11 @@ export async function GET() {
     const sessionCookie = cookieStore.get('session');
     
     if (sessionCookie && sessionCookie.value) {
+      const secure = await getCookieSecureFlag();
       // Re-set cookie to slide expiration window (7 days)
       cookieStore.set('session', sessionCookie.value, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
+        secure,
         sameSite: 'lax',
         maxAge: 60 * 60 * 24 * 7,
       });

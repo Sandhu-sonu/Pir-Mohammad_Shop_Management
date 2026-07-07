@@ -19,6 +19,27 @@ export interface UserSession {
   printerType?: string;
 }
 
+export async function getCookieSecureFlag(): Promise<boolean> {
+  // Allow manual override via environment variable if defined
+  if (process.env.COOKIE_SECURE !== undefined) {
+    return process.env.COOKIE_SECURE === 'true';
+  }
+  
+  if (process.env.NODE_ENV !== 'production') {
+    return false;
+  }
+  
+  try {
+    const headersList = await headers();
+    const xForwardedProto = headersList.get('x-forwarded-proto');
+    const referer = headersList.get('referer');
+    return xForwardedProto === 'https' || (referer ? referer.startsWith('https://') : false);
+  } catch {
+    return false;
+  }
+}
+
+
 export async function login(mobileOrUsername: string, passwordInput: string): Promise<{ success: boolean; error?: string }> {
   let clientIp = '127.0.0.1';
   try {
@@ -97,9 +118,10 @@ export async function login(mobileOrUsername: string, passwordInput: string): Pr
     };
 
     const cookieStore = await cookies();
+    const secure = await getCookieSecureFlag();
     cookieStore.set('session', JSON.stringify(sessionData), {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure,
       sameSite: 'lax',
       maxAge: 60 * 60 * 24 * 7, // 7 days
     });
@@ -219,9 +241,10 @@ export async function login(mobileOrUsername: string, passwordInput: string): Pr
   };
 
   const cookieStore = await cookies();
+  const secure = await getCookieSecureFlag();
   cookieStore.set('session', JSON.stringify(sessionData), {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure,
     sameSite: 'lax',
     maxAge: 60 * 60 * 24 * 7, // 7 days
   });
@@ -382,9 +405,10 @@ export async function impersonateShopAction(targetShopId: string | null): Promis
     }
 
     if (targetShopId) {
+      const secure = await getCookieSecureFlag();
       cookieStore.set('impersonatedShopId', targetShopId, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
+        secure,
         sameSite: 'lax',
         maxAge: 60 * 60 * 2, // 2 hours troubleshoot window
       });
