@@ -1,5 +1,5 @@
 import React from 'react';
-import { getCurrentUser } from '@/lib/actions/auth';
+import { getCurrentUser, logout } from '@/lib/actions/auth';
 import { prisma } from '@/db/prisma';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
@@ -39,6 +39,11 @@ export default async function AdminLayout({
   }
 
   const isImpersonating = cookieStore.get('impersonatedShopId') !== undefined;
+
+  async function handleLogout() {
+    'use server';
+    await logout();
+  }
 
   return (
     <div className="min-h-screen bg-gray-950 flex">
@@ -92,7 +97,7 @@ export default async function AdminLayout({
             Logged in: <span className="text-gray-400 font-semibold">{user.name}</span>
           </div>
 
-          <form action="/api/auth/logout" method="POST">
+          <form action={handleLogout}>
             <button type="submit" className="w-full bg-red-950 border border-red-900 text-red-400 font-bold py-2.5 rounded-xl hover:bg-opacity-95 text-xs transition duration-200">
               Sign Out / ਲਾਗ ਆਉਟ
             </button>
