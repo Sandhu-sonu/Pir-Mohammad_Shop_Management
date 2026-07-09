@@ -1,17 +1,21 @@
 import React, { useState } from 'react';
 import { View, StyleSheet, ScrollView } from 'react-native';
-import { Text, Card, Button, Divider, ActivityIndicator, List, useTheme, Portal, Dialog } from 'react-native-paper';
+import { Text, Card, Button, Divider, ActivityIndicator, List, useTheme } from 'react-native-paper';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../services/api';
 import { useAuthStore } from '../stores/authStore';
 
 export const SettingsScreen = () => {
   const theme = useTheme();
+  const user = useAuthStore((state) => state.user);
   const clearSession = useAuthStore((state) => state.clearSession);
-  const [backupLoading, setBackupLoading] = useState(false);
-  const [backupStatus, setBackupStatus] = useState('');
 
-  const { data, isLoading } = useQuery({
+  // Local state for Language & Theme visual toggle
+  const [lang, setLang] = useState('en'); // 'en' or 'pa'
+  const [isDarkMode, setIsDarkMode] = useState(true);
+
+  // Fetch shop settings information
+  const { data: shopSettings, isLoading, error } = useQuery({
     queryKey: ['shopSettings'],
     queryFn: async () => {
       const res = await api.get('/settings');
@@ -19,95 +23,160 @@ export const SettingsScreen = () => {
     },
   });
 
-  const handleBackup = async () => {
-    setBackupLoading(true);
-    setBackupStatus('');
-    try {
-      const res = await api.post('/backup', { notes: 'Triggered from Owner Mobile App' });
-      if (res.data.success) {
-        setBackupStatus('ਬੈਕਅੱਪ ਸਫਲ (Backup successfully created!)');
-      } else {
-        setBackupStatus('Backup failed.');
-      }
-    } catch (err: any) {
-      console.error(err);
-      setBackupStatus(err.response?.data?.error || 'Backup creation failed.');
-    } finally {
-      setBackupLoading(false);
-    }
+  const handleLogout = async () => {
+    await clearSession();
   };
 
   return (
     <ScrollView style={styles.container}>
+      {/* 1. Owner Profile Section */}
+      <Card style={styles.card}>
+        <Card.Content>
+          <Text variant="titleMedium" style={styles.title}>
+            Owner Profile / ਮਾਲਕ ਪ੍ਰੋਫਾਈਲ
+          </Text>
+          <Divider style={styles.divider} />
+          <View style={styles.row}>
+            <Text style={styles.bold}>Owner Name:</Text>
+            <Text style={styles.value}>{user?.name || 'N/A'}</Text>
+          </View>
+          <View style={styles.row}>
+            <Text style={styles.bold}>Mobile Number:</Text>
+            <Text style={styles.value}>{user?.mobile || 'N/A'}</Text>
+          </View>
+          <View style={styles.row}>
+            <Text style={styles.bold}>Access Role:</Text>
+            <Text style={[styles.value, { color: '#FF6B6B', fontWeight: 'bold' }]}>
+              {user?.role || 'OWNER'}
+            </Text>
+          </View>
+        </Card.Content>
+      </Card>
+
+      {/* 2. Shop Details Section */}
       {isLoading ? (
-        <ActivityIndicator size="large" style={{ marginTop: 48 }} />
-      ) : data ? (
-        <View>
-          {/* Shop Profile Info */}
-          <Card style={styles.card}>
-            <Card.Content>
-              <Text variant="titleMedium" style={styles.title}>Shop Information / ਦੁਕਾਨ ਦਾ ਵੇਰਵਾ</Text>
-              <Divider style={styles.divider} />
-              <View style={styles.row}><Text style={styles.bold}>Shop Name:</Text><Text>{data.name}</Text></View>
-              <View style={styles.row}><Text style={styles.bold}>Address:</Text><Text style={{ maxWidth: 200, textAlign: 'right' }}>{data.address}</Text></View>
-              <View style={styles.row}><Text style={styles.bold}>GSTIN:</Text><Text>{data.gst}</Text></View>
-              <View style={styles.row}><Text style={styles.bold}>Business Type:</Text><Text>{data.businessType}</Text></View>
-            </Card.Content>
-          </Card>
-
-          {/* Sizing Statistics */}
-          <Card style={styles.card}>
-            <Card.Content>
-              <Text variant="titleMedium" style={styles.title}>Database Status / ਡਾਟਾਬੇਸ ਸਥਿਤੀ</Text>
-              <Divider style={styles.divider} />
-              <View style={styles.row}><Text>Total Products in Inventory:</Text><Text style={styles.bold}>{data.stats.productsCount}</Text></View>
-              <View style={styles.row}><Text>Total Sales Invoices Logged:</Text><Text style={styles.bold}>{data.stats.salesCount}</Text></View>
-              <View style={styles.row}><Text>Total Registered Customers:</Text><Text style={styles.bold}>{data.stats.customersCount}</Text></View>
-            </Card.Content>
-          </Card>
-
-          {/* Actions & Utilities */}
-          <Card style={styles.card}>
-            <Card.Content>
-              <Text variant="titleMedium" style={styles.title}>Backup Utilities / ਬੈਕਅੱਪ</Text>
-              <Divider style={styles.divider} />
-              {backupStatus ? (
-                <Text style={{ textAlign: 'center', marginVertical: 8, fontWeight: 'bold', color: theme.colors.primary }}>
-                  {backupStatus}
-                </Text>
-              ) : null}
-              <Button
-                mode="outlined"
-                icon="cloud-upload"
-                onPress={handleBackup}
-                loading={backupLoading}
-                disabled={backupLoading}
-                style={styles.button}
-              >
-                Trigger Manual Backup
-              </Button>
-            </Card.Content>
-          </Card>
-
-          {/* Software Version details */}
-          <Card style={styles.card}>
-            <Card.Content style={{ alignItems: 'center' }}>
-              <Text style={{ color: theme.colors.outline }}>PRMS Mobile App v1.0.0 (Beta)</Text>
-              <Text style={{ color: theme.colors.outline, fontSize: 11, marginTop: 4 }}>
-                Powered by Sher-E-Punjab Retail Backend
+        <ActivityIndicator size="small" color="#FF6B6B" style={{ marginVertical: 24 }} />
+      ) : error || !shopSettings ? (
+        <Card style={styles.card}>
+          <Card.Content>
+            <Text style={{ color: theme.colors.error, textAlign: 'center' }}>
+              Failed to load shop profile data.
+            </Text>
+          </Card.Content>
+        </Card>
+      ) : (
+        <Card style={styles.card}>
+          <Card.Content>
+            <Text variant="titleMedium" style={styles.title}>
+              Shop Information / ਦੁਕਾਨ ਦਾ ਵੇਰਵਾ
+            </Text>
+            <Divider style={styles.divider} />
+            <View style={styles.row}>
+              <Text style={styles.bold}>Shop Name:</Text>
+              <Text style={styles.value}>{shopSettings.name}</Text>
+            </View>
+            <View style={styles.row}>
+              <Text style={styles.bold}>Address:</Text>
+              <Text style={[styles.value, { maxWidth: 200, textAlign: 'right' }]}>
+                {shopSettings.address || 'N/A'}
               </Text>
-              <Button
-                mode="contained"
-                onPress={() => clearSession()}
-                style={[styles.button, { marginTop: 16, width: '100%', backgroundColor: '#E74C3C' }]}
-                contentStyle={{ height: 44 }}
-              >
-                Log Out / ਲਾਗ ਆਉਟ
-              </Button>
-            </Card.Content>
-          </Card>
-        </View>
-      ) : null}
+            </View>
+            <View style={styles.row}>
+              <Text style={styles.bold}>Phone / Phone:</Text>
+              <Text style={styles.value}>{shopSettings.phone || 'N/A'}</Text>
+            </View>
+            <View style={styles.row}>
+              <Text style={styles.bold}>GSTIN:</Text>
+              <Text style={styles.value}>{shopSettings.gst || 'N/A'}</Text>
+            </View>
+            <View style={styles.row}>
+              <Text style={styles.bold}>Business Type:</Text>
+              <Text style={styles.value}>{shopSettings.businessType}</Text>
+            </View>
+          </Card.Content>
+        </Card>
+      )}
+
+      {/* 3. Language Selection */}
+      <Card style={styles.card}>
+        <Card.Content>
+          <Text variant="titleMedium" style={styles.title}>
+            Language / ਭਾਸ਼ਾ
+          </Text>
+          <Divider style={styles.divider} />
+          <View style={styles.buttonToggleRow}>
+            <Button
+              mode={lang === 'en' ? 'contained' : 'outlined'}
+              onPress={() => setLang('en')}
+              style={styles.toggleBtn}
+              compact
+            >
+              English
+            </Button>
+            <Button
+              mode={lang === 'pa' ? 'contained' : 'outlined'}
+              onPress={() => setLang('pa')}
+              style={styles.toggleBtn}
+              compact
+            >
+              ਪੰਜਾਬੀ
+            </Button>
+          </View>
+        </Card.Content>
+      </Card>
+
+      {/* 4. Theme Selection */}
+      <Card style={styles.card}>
+        <Card.Content>
+          <Text variant="titleMedium" style={styles.title}>
+            Theme / ਥੀਮ
+          </Text>
+          <Divider style={styles.divider} />
+          <View style={styles.buttonToggleRow}>
+            <Button
+              mode={!isDarkMode ? 'contained' : 'outlined'}
+              onPress={() => setIsDarkMode(false)}
+              style={styles.toggleBtn}
+              icon="weather-sunny"
+              compact
+            >
+              Light
+            </Button>
+            <Button
+              mode={isDarkMode ? 'contained' : 'outlined'}
+              onPress={() => setIsDarkMode(true)}
+              style={styles.toggleBtn}
+              icon="weather-night"
+              compact
+            >
+              Dark
+            </Button>
+          </View>
+        </Card.Content>
+      </Card>
+
+      {/* 5. Software Details & Logout */}
+      <Card style={styles.card}>
+        <Card.Content style={{ alignItems: 'center' }}>
+          <Text style={{ color: theme.colors.outline, fontSize: 13 }}>
+            PRMS Mobile App v1.0.0 (Minimal Scope)
+          </Text>
+          <Text style={{ color: theme.colors.outline, fontSize: 11, marginTop: 4, textAlign: 'center' }}>
+            Sher-E-Punjab Retail Management System
+          </Text>
+          
+          <Button
+            mode="contained"
+            icon="logout"
+            onPress={handleLogout}
+            style={styles.logoutButton}
+            contentStyle={{ height: 44 }}
+          >
+            Log Out / ਲਾਗ ਆਉਟ
+          </Button>
+        </Card.Content>
+      </Card>
+
       <View style={{ height: 32 }} />
     </ScrollView>
   );
@@ -135,13 +204,30 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: 6,
+    alignItems: 'center',
+    paddingVertical: 8,
   },
   bold: {
     fontWeight: 'bold',
+    color: '#A0A0A0',
   },
-  button: {
+  value: {
+    color: '#FFFFFF',
+  },
+  buttonToggleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 4,
+  },
+  toggleBtn: {
+    flex: 1,
+    marginHorizontal: 4,
     borderRadius: 8,
-    marginVertical: 6,
+  },
+  logoutButton: {
+    marginTop: 20,
+    width: '100%',
+    backgroundColor: '#E74C3C',
+    borderRadius: 8,
   },
 });

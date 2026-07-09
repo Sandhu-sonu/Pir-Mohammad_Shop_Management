@@ -15,6 +15,49 @@ export async function GET(request: Request) {
     }
 
     const { searchParams } = new URL(request.url);
+    const customerId = searchParams.get('id');
+
+    // --- CASE A: SINGLE CUSTOMER DETAIL & LEDGER HISTORY ---
+    if (customerId) {
+      const customer = await prisma.customer.findFirst({
+        where: { id: customerId, shopId: user.shopId, isDeleted: false }
+      });
+
+      if (!customer) {
+        return NextResponse.json({ success: false, error: 'Customer not found' }, { status: 404 });
+      }
+
+      // Fetch latest 50 ledger entries for this customer
+      const ledgers = await prisma.customerLedger.findMany({
+        where: { customerId: customer.id },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+        include: {
+          sale: { select: { invoiceNumber: true } }
+        }
+      });
+
+      const details = {
+        id: customer.id,
+        name: customer.name,
+        mobile: customer.mobile || '',
+        address: customer.address || '',
+        notes: customer.notes || '',
+        currentBalance: customer.currentBalance.toNumber(),
+        ledger: ledgers.map(l => ({
+          id: l.id,
+          type: l.type,
+          amount: l.amount.toNumber(),
+          balanceAfter: l.balanceAfter.toNumber(),
+          note: l.note || '',
+          createdAt: l.createdAt.toISOString(),
+          invoiceNumber: l.sale?.invoiceNumber || null
+        }))
+      };
+
+      return NextResponse.json({ success: true, data: details });
+    }
+
     const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
     const pageSize = Math.max(1, Math.min(250, parseInt(searchParams.get('pageSize') || '50')));
     const search = searchParams.get('search') || '';

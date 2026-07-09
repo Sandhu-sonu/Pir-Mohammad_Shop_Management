@@ -1,9 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { View, StyleSheet, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { TextInput, Button, Text, Checkbox, useTheme, ActivityIndicator } from 'react-native-paper';
 import { useAuthStore } from '../stores/authStore';
 import axios from 'axios';
-import * as LocalAuthentication from 'expo-local-authentication';
 import { API_BASE_URL } from '../services/api';
 
 export const LoginScreen = () => {
@@ -16,19 +15,31 @@ export const LoginScreen = () => {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [hasBiometrics, setHasBiometrics] = useState(false);
-
-  useEffect(() => {
-    (async () => {
-      const compatible = await LocalAuthentication.hasHardwareAsync();
-      const enrolled = await LocalAuthentication.isEnrolledAsync();
-      setHasBiometrics(compatible && enrolled);
-    })();
-  }, []);
 
   const handleLogin = async () => {
-    if (!mobile || !password) {
-      setError('ਕਿਰਪਾ ਕਰਕੇ ਮੋਬਾਈਲ ਅਤੇ ਪਾਸਵਰਡ ਭਰੋ (Enter mobile and password)');
+    // 1. Clean Inputs
+    const cleanMobile = mobile.trim();
+    const cleanPassword = password.trim();
+
+    // 2. Client-side Validation
+    if (!cleanMobile) {
+      setError('ਕਿਰਪਾ ਕਰਕੇ ਮੋਬਾਈਲ ਨੰਬਰ ਭਰੋ (Please enter mobile number)');
+      return;
+    }
+    
+    // Check for a standard Indian 10-digit mobile number format
+    if (!/^\d{10}$/.test(cleanMobile)) {
+      setError('ਕਿਰਪਾ ਕਰਕੇ 10-ਅੰਕਾਂ ਦਾ ਮੋਬਾਈਲ ਨੰਬਰ ਭਰੋ (Please enter a valid 10-digit mobile number)');
+      return;
+    }
+
+    if (!cleanPassword) {
+      setError('ਕਿਰਪਾ ਕਰਕੇ ਪਾਸਵਰਡ ਭਰੋ (Please enter password)');
+      return;
+    }
+
+    if (cleanPassword.length < 6) {
+      setError('ਪਾਸਵਰਡ ਘੱਟੋ-ਘੱਟ 6 ਅੱਖਰਾਂ ਦਾ ਹੋਣਾ ਚਾਹੀਦਾ ਹੈ (Password must be at least 6 characters)');
       return;
     }
 
@@ -37,35 +48,28 @@ export const LoginScreen = () => {
 
     try {
       const res = await axios.post(`${API_BASE_URL}/auth`, {
-        mobile,
-        password,
+        mobile: cleanMobile,
+        password: cleanPassword,
       });
 
       if (res.data.success) {
         await setSession(res.data.token, res.data.user);
       } else {
-        setError(res.data.error || 'Login failed');
+        setError(res.data.error || 'లాగిన్ విఫలమైంది (Login failed)');
       }
     } catch (err: any) {
-      console.error(err);
-      setError(
-        err.response?.data?.error || 
-        'ਕਨੈਕਸ਼ਨ ਅਸਫਲ ਰਿਹਾ (Backend connection failed. Verify URL/Network.)'
-      );
+      console.error('Login error details:', err);
+      
+      const serverError = err.response?.data?.error;
+      if (serverError) {
+        setError(serverError);
+      } else if (err.code === 'ERR_NETWORK') {
+        setError('ਨੈੱਟਵਰਕ ਕਨੈਕਸ਼ਨ ਅਸਫਲ ਰਿਹਾ। ਸਰਵਰ ਅਤੇ ਨੈੱਟਵਰਕ ਦੀ ਜਾਂਚ ਕਰੋ। (Network connection failed. Verify server is online.)');
+      } else {
+        setError('ਕਨੈਕਸ਼ਨ ਅਸਫਲ ਰਿਹਾ (Backend connection failed. Verify network configuration.)');
+      }
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleBiometricAuth = async () => {
-    const result = await LocalAuthentication.authenticateAsync({
-      promptMessage: 'Authenticate to access PRMS',
-      fallbackLabel: 'Use Password',
-    });
-
-    if (result.success) {
-      // Stub: in real usage, we decrypt credentials saved in SecureStore to log in
-      setError('Biometric authentication succeeded!');
     }
   };
 
@@ -74,12 +78,12 @@ export const LoginScreen = () => {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={styles.container}
     >
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <View style={styles.header}>
           <Text variant="headlineMedium" style={styles.title}>
             PRMS Owner App
           </Text>
-          <Text variant="bodyLarge" style={{ color: theme.colors.outline }}>
+          <Text variant="bodyLarge" style={{ color: theme.colors.outline, marginTop: 4 }}>
             ਸ਼ੇਰ-ਏ-ਪੰਜਾਬ ਰਿਟੇਲ ਮੈਨੇਜਮੈਂਟ
           </Text>
         </View>
@@ -94,21 +98,30 @@ export const LoginScreen = () => {
           <TextInput
             label="Mobile Number / ਮੋਬਾਈਲ"
             value={mobile}
-            onChangeText={setMobile}
+            onChangeText={(text) => {
+              setMobile(text);
+              if (error) setError('');
+            }}
             mode="outlined"
             keyboardType="phone-pad"
             style={styles.input}
             left={<TextInput.Icon icon="phone" />}
+            disabled={loading}
+            maxLength={10}
           />
 
           <TextInput
             label="Password / ਪਾਸਵਰਡ"
             value={password}
-            onChangeText={setPassword}
+            onChangeText={(text) => {
+              setPassword(text);
+              if (error) setError('');
+            }}
             secureTextEntry
             mode="outlined"
             style={styles.input}
             left={<TextInput.Icon icon="lock" />}
+            disabled={loading}
           />
 
           <View style={styles.row}>
@@ -116,8 +129,9 @@ export const LoginScreen = () => {
               <Checkbox
                 status={rememberMe ? 'checked' : 'unchecked'}
                 onPress={() => setRememberMe(!rememberMe)}
+                disabled={loading}
               />
-              <Text variant="bodyMedium">Remember Me</Text>
+              <Text variant="bodyMedium" style={{ color: '#FFFFFF' }}>Remember Me</Text>
             </View>
           </View>
 
@@ -130,17 +144,6 @@ export const LoginScreen = () => {
           >
             {loading ? <ActivityIndicator color="#FFFFFF" /> : 'Log In / ਲਾਗਇਨ'}
           </Button>
-
-          {hasBiometrics && (
-            <Button
-              mode="outlined"
-              onPress={handleBiometricAuth}
-              style={styles.biometricBtn}
-              icon="fingerprint"
-            >
-              Use Biometrics
-            </Button>
-          )}
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -187,13 +190,10 @@ const styles = StyleSheet.create({
   button: {
     marginTop: 8,
     borderRadius: 8,
+    backgroundColor: '#FF6B6B',
   },
   buttonContent: {
     height: 48,
-  },
-  biometricBtn: {
-    marginTop: 16,
-    borderRadius: 8,
   },
   error: {
     marginBottom: 16,

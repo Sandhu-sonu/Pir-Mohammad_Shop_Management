@@ -25,11 +25,12 @@ export async function GET() {
       return NextResponse.json({ success: false, error: 'Shop config not found' }, { status: 404 });
     }
 
-    // Get database sizing stats
-    const [productsCount, salesCount, customersCount] = await Promise.all([
+    // Get database sizing stats and categories
+    const [productsCount, salesCount, customersCount, categories] = await Promise.all([
       prisma.product.count({ where: { shopId: shop.id, isDeleted: false } }),
       prisma.sale.count({ where: { shopId: shop.id } }),
-      prisma.customer.count({ where: { shopId: shop.id, isDeleted: false } })
+      prisma.customer.count({ where: { shopId: shop.id, isDeleted: false } }),
+      prisma.category.findMany({ where: { shopId: shop.id }, select: { id: true, name: true } })
     ]);
 
     const data = {
@@ -41,6 +42,7 @@ export async function GET() {
       email: shop.email || '',
       businessType: shop.businessType,
       logoUrl: null, // Placeholder for future shop logo support
+      categories: categories.map(c => ({ id: c.id, name: c.name })),
       settings: {
         language: shop.settings?.language || 'pa',
         theme: shop.settings?.theme || 'light',

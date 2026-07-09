@@ -1,8 +1,10 @@
 import axios from 'axios';
 import { useAuthStore } from '../stores/authStore';
 
-// For local testing: 10.0.2.2 maps to the host machine's localhost under Android Emulators
-export const API_BASE_URL = 'http://10.0.2.2:3000/api/v1/mobile';
+export const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL;
+if (!API_BASE_URL) {
+  throw new Error('EXPO_PUBLIC_API_URL environment variable is missing. Setup your production static IP or domain name before running.');
+}
 
 export const api = axios.create({
   baseURL: API_BASE_URL,

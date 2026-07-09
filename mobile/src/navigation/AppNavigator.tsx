@@ -4,12 +4,8 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useAuthStore } from '../stores/authStore';
 import { LoginScreen } from '../screens/LoginScreen';
 import { DashboardScreen } from '../screens/DashboardScreen';
-import { SalesScreen } from '../screens/SalesScreen';
 import { InventoryScreen } from '../screens/InventoryScreen';
 import { CustomerScreen } from '../screens/CustomerScreen';
-import { SupplierScreen } from '../screens/SupplierScreen';
-import { ReportScreen } from '../screens/ReportScreen';
-import { ClosingScreen } from '../screens/ClosingScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { IconButton } from 'react-native-paper';
 
@@ -19,7 +15,7 @@ const Tab = createBottomTabNavigator();
 const TabNavigator = () => {
   return (
     <Tab.Navigator
-      screenOptions={({ route }) => ({
+      screenOptions={() => ({
         tabBarActiveTintColor: '#FF6B6B',
         tabBarInactiveTintColor: '#888888',
         tabBarStyle: {
@@ -43,23 +39,15 @@ const TabNavigator = () => {
         name="Dashboard"
         component={DashboardScreen}
         options={{
-          title: 'Summary',
+          title: 'Summary / ਖੁਲਾਸਾ',
           tabBarIcon: ({ color, size }) => <IconButton icon="view-dashboard" iconColor={color} size={size - 4} />,
-        }}
-      />
-      <Tab.Screen
-        name="Sales"
-        component={SalesScreen}
-        options={{
-          title: 'Bills',
-          tabBarIcon: ({ color, size }) => <IconButton icon="receipt" iconColor={color} size={size - 4} />,
         }}
       />
       <Tab.Screen
         name="Inventory"
         component={InventoryScreen}
         options={{
-          title: 'Stock',
+          title: 'Stock / ਸਟਾਕ',
           tabBarIcon: ({ color, size }) => <IconButton icon="package-variant-closed" iconColor={color} size={size - 4} />,
         }}
       />
@@ -67,16 +55,16 @@ const TabNavigator = () => {
         name="Customers"
         component={CustomerScreen}
         options={{
-          title: 'Khata',
+          title: 'Khata / ਖਾਤਾ',
           tabBarIcon: ({ color, size }) => <IconButton icon="account-group" iconColor={color} size={size - 4} />,
         }}
       />
       <Tab.Screen
-        name="Suppliers"
-        component={SupplierScreen}
+        name="Settings"
+        component={SettingsScreen}
         options={{
-          title: 'Suppliers',
-          tabBarIcon: ({ color, size }) => <IconButton icon="truck" iconColor={color} size={size - 4} />,
+          title: 'Settings / ਸੈਟਿੰਗਾਂ',
+          tabBarIcon: ({ color, size }) => <IconButton icon="cog" iconColor={color} size={size - 4} />,
         }}
       />
     </Tab.Navigator>
@@ -105,28 +93,11 @@ export const AppNavigator = () => {
           options={{ headerShown: false }}
         />
       ) : (
-        <>
-          <Stack.Screen
-            name="MainTabs"
-            component={TabNavigator}
-            options={{ headerShown: false }}
-          />
-          <Stack.Screen
-            name="Reports"
-            component={ReportScreen}
-            options={{ title: 'Business Reports' }}
-          />
-          <Stack.Screen
-            name="Closing"
-            component={ClosingScreen}
-            options={{ title: 'Closing Logs' }}
-          />
-          <Stack.Screen
-            name="Settings"
-            component={SettingsScreen}
-            options={{ title: 'Shop Settings' }}
-          />
-        </>
+        <Stack.Screen
+          name="MainTabs"
+          component={TabNavigator}
+          options={{ headerShown: false }}
+        />
       )}
     </Stack.Navigator>
   );

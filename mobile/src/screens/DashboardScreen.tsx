@@ -1,14 +1,15 @@
 import React, { useState } from 'react';
 import { View, StyleSheet, ScrollView, RefreshControl } from 'react-native';
-import { Text, Card, useTheme, ActivityIndicator, Divider } from 'react-native-paper';
+import { Text, Card, useTheme, ActivityIndicator, Button } from 'react-native-paper';
 import { useQuery } from '@tanstack/react-query';
+import { useNavigation } from '@react-navigation/native';
 import { api } from '../services/api';
 import { MetricCard } from '../components/MetricCard';
-import { LineChart } from '../components/LineChart';
 import { useAuthStore } from '../stores/authStore';
 
 export const DashboardScreen = () => {
   const theme = useTheme();
+  const navigation = useNavigation<any>();
   const user = useAuthStore((state) => state.user);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -29,8 +30,8 @@ export const DashboardScreen = () => {
   if (isLoading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" />
-        <Text style={{ marginTop: 12 }}>Loading business summary...</Text>
+        <ActivityIndicator size="large" color="#FF6B6B" />
+        <Text style={{ marginTop: 12, color: '#A0A0A0' }}>Loading business summary...</Text>
       </View>
     );
   }
@@ -41,129 +42,144 @@ export const DashboardScreen = () => {
         <Text style={{ color: theme.colors.error, fontWeight: 'bold' }}>
           Failed to load summary stats.
         </Text>
-        <Text style={{ color: theme.colors.outline, marginTop: 8 }}>
+        <Text style={{ color: theme.colors.outline, marginTop: 8, textAlign: 'center', paddingHorizontal: 24 }}>
           Verify connection to your backend server.
         </Text>
+        <Button mode="contained" onPress={() => refetch()} style={{ marginTop: 16, backgroundColor: '#FF6B6B' }}>
+          Retry / ਦੁਬਾਰਾ ਕੋਸ਼ਿਸ਼ ਕਰੋ
+        </Button>
       </View>
     );
   }
 
-  // Format SVG chart coordinates
-  const chartPoints = data.salesTrend.map((t: any) => ({
-    label: t.dayEn,
-    value: t.amount,
-  }));
+  // Format subscription expiry date
+  const formatExpiryDate = (isoStr: string | null) => {
+    if (!isoStr) return 'N/A';
+    try {
+      return new Date(isoStr).toLocaleDateString();
+    } catch {
+      return 'N/A';
+    }
+  };
 
   return (
     <ScrollView
       style={styles.container}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FF6B6B" />}
     >
+      {/* Header Profile Title */}
       <View style={styles.header}>
         <Text variant="headlineSmall" style={styles.welcome}>
           ਸਤਿ ਸ੍ਰੀ ਅਕਾਲ, {user?.name || 'Owner'}!
         </Text>
-        <Text variant="bodyMedium" style={{ color: theme.colors.outline }}>
-          Shop: {user?.shopName} | Business Summary
+        <Text variant="bodyMedium" style={{ color: theme.colors.outline, marginTop: 4 }}>
+          Shop: {user?.shopName} | Business Dashboard
         </Text>
       </View>
 
-      {/* Row 1: Sales and Profit KPIs */}
+      {/* Quick Action Navigation Grid */}
+      <Text variant="titleMedium" style={styles.sectionTitle}>
+        Quick Actions / ਤੁਰੰਤ ਲਿੰਕ
+      </Text>
+      <View style={styles.actionRow}>
+        <Button
+          mode="contained-tonal"
+          icon="package-variant-closed"
+          onPress={() => navigation.navigate('Inventory')}
+          style={styles.actionButton}
+          labelStyle={styles.actionLabel}
+        >
+          Stock / ਸਟਾਕ
+        </Button>
+        <Button
+          mode="contained-tonal"
+          icon="account-group"
+          onPress={() => navigation.navigate('Customers')}
+          style={styles.actionButton}
+          labelStyle={styles.actionLabel}
+        >
+          Khata / ਖਾਤਾ
+        </Button>
+        <Button
+          mode="contained-tonal"
+          icon="cog"
+          onPress={() => navigation.navigate('Settings')}
+          style={styles.actionButton}
+          labelStyle={styles.actionLabel}
+        >
+          Settings / ਸੈਟਿੰਗਾਂ
+        </Button>
+      </View>
+
+      {/* Subscription Card */}
+      <Card style={styles.subCard}>
+        <Card.Content style={styles.subContent}>
+          <View>
+            <Text style={styles.subTitle}>Subscription Plan / ਪਲਾਨ</Text>
+            <Text style={styles.subPlan}>{data.planName || 'N/A'}</Text>
+          </View>
+          <View style={{ alignItems: 'flex-end' }}>
+            <Text style={[styles.subStatus, { color: data.subscriptionStatus === 'ACTIVE' ? '#2ECC71' : '#E67E22' }]}>
+              {data.subscriptionStatus}
+            </Text>
+            <Text style={styles.subExpiry}>
+              Expires: {formatExpiryDate(data.subscriptionExpiry)}
+            </Text>
+          </View>
+        </Card.Content>
+      </Card>
+
+      <Text variant="titleMedium" style={styles.sectionTitle}>
+        Business Indicators / ਕਾਰੋਬਾਰੀ ਸੂਚਕ
+      </Text>
+
+      {/* Row 1: Sales & Collection */}
       <View style={styles.row}>
         <MetricCard
-          title="Today's Sales / ਅੱਜ ਦੀ ਵਿਕਰੀ"
+          title="Today's Sales / ਵਿਕਰੀ"
           value={`₹${data.todaySales}`}
           subtitle={`${data.todayBills} Bills generated`}
           color="#2ECC71"
         />
         <MetricCard
-          title="Today's Profit / ਲਾਭ"
-          value={`₹${data.todayProfit}`}
-          color="#3498DB"
+          title="Today's Collection / ਉਗਰਾਹੀ"
+          value={`₹${data.todayCollection}`}
+          subtitle="Payments received today"
+          color="#1ABC9C"
         />
       </View>
 
-      {/* Row 2: Monthly sales and profit KPIs */}
+      {/* Row 2: Monthly Sales & Outstanding Khata */}
       <View style={styles.row}>
         <MetricCard
           title="Monthly Sales / ਮਹੀਨੇ ਦੀ ਵਿਕਰੀ"
           value={`₹${data.monthlySales}`}
-          color="#F1C40F"
+          color="#3498DB"
         />
         <MetricCard
-          title="Monthly Profit"
-          value={`₹${data.monthlyProfit}`}
-          color="#9B59B6"
-        />
-      </View>
-
-      {/* Row 3: Outstanding Ledger Balances */}
-      <View style={styles.row}>
-        <MetricCard
-          title="Customer Due / ਉਧਾਰ ਖਾਤਾ"
+          title="Outstanding Khata / ਉਧਾਰ ਖਾਤਾ"
           value={`₹${data.customerDue}`}
           color="#E74C3C"
         />
-        <MetricCard
-          title="Supplier Due / ਲੈਣਦਾਰੀ"
-          value={`₹${data.supplierDue}`}
-          color="#E67E22"
-        />
       </View>
 
-      {/* Row 4: Cash in Hand & Stock indicators */}
+      {/* Row 3: Current Stock & Low Stock Items */}
       <View style={styles.row}>
         <MetricCard
-          title="Cash In Hand / ਕੈਸ਼"
-          value={`₹${data.cashInHand}`}
-          color="#1ABC9C"
+          title="Current Stock / ਕੁੱਲ ਉਤਪਾਦ"
+          value={`${data.totalProducts}`}
+          subtitle="Unique products in catalog"
+          color="#9B59B6"
         />
         <MetricCard
-          title="Stock / ਸਟਾਕ ਅਲਰਟ"
+          title="Low Stock / ਘੱਟ ਸਟਾਕ"
           value={`${data.lowStock}`}
-          subtitle={`${data.outOfStock} Out of Stock`}
-          color="#E74C3C"
+          subtitle={`${data.outOfStock || 0} Out of Stock`}
+          color={data.lowStock > 0 ? '#E67E22' : '#2ECC71'}
         />
       </View>
 
-      {/* Sales Trend Chart */}
-      <View style={styles.section}>
-        <Text variant="titleMedium" style={styles.sectionTitle}>
-          Weekly Sales Trend / ਹਫਤਾਵਾਰੀ ਰੁਝਾਨ
-        </Text>
-        <LineChart data={chartPoints} />
-      </View>
-
-      {/* Top 10 Selling Products List */}
-      <Card style={styles.sectionCard}>
-        <Card.Content>
-          <Text variant="titleMedium" style={styles.sectionTitle}>
-            Top Selling Products / ਪ੍ਰਮੁੱਖ ਉਤਪਾਦ
-          </Text>
-          <Divider style={{ marginVertical: 8 }} />
-          {data.topSellingProducts.map((p: any, idx: number) => (
-            <View key={p.id} style={styles.listItem}>
-              <View style={styles.listItemLeft}>
-                <Text style={styles.listIdx}>{idx + 1}.</Text>
-                <View>
-                  <Text style={styles.listTextEn}>{p.nameEn}</Text>
-                  <Text style={styles.listTextPa}>{p.namePa}</Text>
-                </View>
-              </View>
-              <Text style={styles.listQty}>
-                {p.totalQty} {p.unit}
-              </Text>
-            </View>
-          ))}
-          {data.topSellingProducts.length === 0 && (
-            <Text style={{ textAlign: 'center', marginVertical: 12, color: theme.colors.outline }}>
-              No sales logged yet.
-            </Text>
-          )}
-        </Card.Content>
-      </Card>
-      
-      <View style={{ height: 24 }} />
+      <View style={{ height: 32 }} />
     </ScrollView>
   );
 };
@@ -179,60 +195,71 @@ const styles = StyleSheet.create({
     backgroundColor: '#121212',
     justifyContent: 'center',
     alignItems: 'center',
+    padding: 24,
   },
   header: {
-    marginVertical: 12,
-    paddingLeft: 6,
+    marginVertical: 16,
+    paddingLeft: 4,
   },
   welcome: {
     fontWeight: 'bold',
     color: '#FF6B6B',
   },
-  row: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  section: {
-    marginVertical: 12,
-    paddingHorizontal: 6,
-  },
   sectionTitle: {
     fontWeight: 'bold',
     color: '#FFFFFF',
-    marginBottom: 6,
+    marginTop: 12,
+    marginBottom: 8,
+    paddingLeft: 4,
   },
-  sectionCard: {
-    marginVertical: 12,
+  actionRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  actionButton: {
+    flex: 1,
+    marginHorizontal: 4,
+    borderRadius: 8,
+  },
+  actionLabel: {
+    fontSize: 11,
+    marginHorizontal: 0,
+  },
+  subCard: {
     backgroundColor: '#1E1E1E',
+    borderColor: '#2D2D2D',
+    borderWidth: 1,
     borderRadius: 12,
+    marginBottom: 16,
   },
-  listItem: {
+  subContent: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 10,
-    borderBottomWidth: 0.5,
-    borderBottomColor: '#2D2D2D',
   },
-  listItemLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  listIdx: {
-    fontWeight: 'bold',
-    marginRight: 8,
-    color: '#FF6B6B',
-  },
-  listTextEn: {
-    color: '#FFFFFF',
-    fontWeight: '500',
-  },
-  listTextPa: {
+  subTitle: {
+    fontSize: 11,
     color: '#A0A0A0',
-    fontSize: 12,
   },
-  listQty: {
-    color: '#2ECC71',
+  subPlan: {
+    fontSize: 16,
     fontWeight: 'bold',
+    color: '#FFFFFF',
+    marginTop: 2,
+  },
+  subStatus: {
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
+  subExpiry: {
+    fontSize: 10,
+    color: '#A0A0A0',
+    marginTop: 4,
+  },
+  row: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
   },
 });

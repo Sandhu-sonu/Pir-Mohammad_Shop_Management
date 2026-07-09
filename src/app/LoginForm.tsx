@@ -48,11 +48,6 @@ export default function LoginForm() {
     }
   };
 
-  const handleQuickLogin = () => {
-    setValue('mobile', 'admin');
-    setValue('password', 'admin123');
-  };
-
   return (
     <form className="space-y-6" onSubmit={handleSubmit(onSubmit)}>
       {error && (
@@ -104,14 +99,6 @@ export default function LoginForm() {
           className="w-full flex justify-center py-3.5 px-4 border border-transparent rounded-lg shadow-sm text-lg font-bold text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
         >
           {loading ? 'ਲੌਗਇਨ ਹੋ ਰਿਹਾ ਹੈ...' : 'ਲੌਗਇਨ ਕਰੋ (Login)'}
-        </button>
-
-        <button
-          type="button"
-          onClick={handleQuickLogin}
-          className="w-full py-2.5 px-4 bg-slate-700 hover:bg-slate-605 text-slate-205 rounded-lg text-sm font-bold transition-all"
-        >
-          ਕੁਇੱਕ ਫਿਲ - admin / admin123
         </button>
 
         <div className="text-center pt-2">
