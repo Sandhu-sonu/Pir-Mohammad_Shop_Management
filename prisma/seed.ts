@@ -102,7 +102,7 @@ async function main() {
 
   // 4. Seed SaaS Plans (Idempotent)
   const plansData = [
-    { name: 'Basic Plan', price: 10000.00, billingPeriod: BillingPeriod.MONTHLY },
+    { name: 'Basic Plan', price: 1000.00, billingPeriod: BillingPeriod.MONTHLY },
     { name: 'Premium Plan', price: 1200.00, billingPeriod: BillingPeriod.MONTHLY },
     { name: 'Enterprise Plan', price: 3000.00, billingPeriod: BillingPeriod.MONTHLY }
   ];
