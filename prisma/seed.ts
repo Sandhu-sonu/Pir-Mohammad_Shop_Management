@@ -102,9 +102,9 @@ async function main() {
 
   // 4. Seed SaaS Plans (Idempotent)
   const plansData = [
-    { name: 'Basic Plan', price: 1000.00, billingPeriod: BillingPeriod.MONTHLY },
-    { name: 'Premium Plan', price: 1200.00, billingPeriod: BillingPeriod.MONTHLY },
-    { name: 'Enterprise Plan', price: 3000.00, billingPeriod: BillingPeriod.MONTHLY }
+    { name: 'Basic Plan', price: 600.00, billingPeriod: BillingPeriod.MONTHLY },
+    { name: 'Premium Plan', price: 1000.00, billingPeriod: BillingPeriod.MONTHLY },
+    { name: 'Enterprise Plan', price: 10000.00, billingPeriod: BillingPeriod.MONTHLY }
   ];
 
   const seededPlans: Record<string, string> = {};
@@ -134,7 +134,7 @@ async function main() {
     { planId: basicPlanId, featureCode: 'INVENTORY', enabled: true, limitType: 'PRODUCTS', limitValue: 100 },
     { planId: basicPlanId, featureCode: 'CUSTOMERS', enabled: true, limitType: 'CUSTOMERS', limitValue: 50 },
     { planId: basicPlanId, featureCode: 'KHATA', enabled: true, limitType: 'KHATA', limitValue: 0 },
-    { planId: basicPlanId, featureCode: 'MOBILE_APP', enabled: true, limitType: 'NONE', limitValue: 0 },
+    { planId: basicPlanId, featureCode: 'MOBILE_APP', enabled: false, limitType: 'NONE', limitValue: 0 },
     { planId: basicPlanId, featureCode: 'BACKUP', enabled: false, limitType: 'BACKUPS', limitValue: 0 },
     { planId: basicPlanId, featureCode: 'MULTI_USER', enabled: false, limitType: 'USERS', limitValue: 0 },
 
