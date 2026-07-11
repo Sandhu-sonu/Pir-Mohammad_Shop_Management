@@ -85,7 +85,6 @@ export const DashboardScreen = () => {
       <View style={styles.actionRow}>
         <Button
           mode="contained-tonal"
-          icon="package-variant-closed"
           onPress={() => navigation.navigate('Inventory')}
           style={styles.actionButton}
           labelStyle={styles.actionLabel}
@@ -94,7 +93,6 @@ export const DashboardScreen = () => {
         </Button>
         <Button
           mode="contained-tonal"
-          icon="account-group"
           onPress={() => navigation.navigate('Customers')}
           style={styles.actionButton}
           labelStyle={styles.actionLabel}
@@ -103,7 +101,6 @@ export const DashboardScreen = () => {
         </Button>
         <Button
           mode="contained-tonal"
-          icon="cog"
           onPress={() => navigation.navigate('Settings')}
           style={styles.actionButton}
           labelStyle={styles.actionLabel}
