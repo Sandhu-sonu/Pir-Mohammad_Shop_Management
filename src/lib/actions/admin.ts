@@ -150,7 +150,7 @@ export async function deleteShopAction(shopId: string): Promise<{ success: boole
       prisma.purchaseItem.deleteMany({
         where: { purchase: { shopId } }
       }),
-      prisma.stockAdjustment.deleteMany({
+      prisma.purchaseReturn.deleteMany({
         where: { product: { shopId } }
       }),
       prisma.saleItem.deleteMany({
