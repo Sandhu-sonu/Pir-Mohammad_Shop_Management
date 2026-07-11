@@ -145,9 +145,24 @@ export async function deleteShopAction(shopId: string): Promise<{ success: boole
       return { success: false, error: 'Cannot delete the system administrative tenant.' };
     }
 
-    await prisma.shop.delete({
-      where: { id: shopId }
-    });
+    // Delete restricted dependencies inside a transaction to prevent foreign key errors
+    await prisma.$transaction([
+      prisma.purchaseItem.deleteMany({
+        where: { purchase: { shopId } }
+      }),
+      prisma.stockAdjustment.deleteMany({
+        where: { product: { shopId } }
+      }),
+      prisma.saleItem.deleteMany({
+        where: { sale: { shopId } }
+      }),
+      prisma.purchase.deleteMany({
+        where: { shopId }
+      }),
+      prisma.shop.delete({
+        where: { id: shopId }
+      })
+    ]);
 
     // Log action to global system audit logs
     await prisma.auditLog.create({
