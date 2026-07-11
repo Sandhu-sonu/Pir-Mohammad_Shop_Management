@@ -13,7 +13,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "http://13.63.250.140:3000/api/v1/mobile"
+        "EXPO_PUBLIC_API_URL": "http://13.63.250.140/api/v1/mobile"
       }
     },
     "production": {}
