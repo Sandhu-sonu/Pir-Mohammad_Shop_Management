@@ -37,3 +37,19 @@ api.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+
+export function getFriendlyErrorMessage(err: any): string {
+  if (err.response) {
+    const status = err.response.status;
+    const msg = err.response.data?.error || err.message;
+    const endpoint = err.config?.url || '';
+    return `Server Error. Status: ${status}\nEndpoint: ${endpoint}\nDetail: ${msg}`;
+  } else if (err.request) {
+    const endpoint = err.config?.url || '';
+    const timeoutMsg = err.code === 'ECONNABORTED' ? ' (Timeout after 15s)' : '';
+    return `Cannot reach server${timeoutMsg}.\nVerify server is online and port 80/3000 is open.\nURL: ${endpoint}`;
+  } else {
+    return `Connection error: ${err.message}`;
+  }
+}
+

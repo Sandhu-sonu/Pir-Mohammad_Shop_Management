@@ -3,7 +3,7 @@ import { View, StyleSheet, ScrollView, RefreshControl } from 'react-native';
 import { Text, Card, useTheme, ActivityIndicator, Button } from 'react-native-paper';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigation } from '@react-navigation/native';
-import { api } from '../services/api';
+import { api, getFriendlyErrorMessage } from '../services/api';
 import { MetricCard } from '../components/MetricCard';
 import { useAuthStore } from '../stores/authStore';
 
@@ -37,13 +37,14 @@ export const DashboardScreen = () => {
   }
 
   if (error || !data) {
+    const errorDetail = error ? getFriendlyErrorMessage(error) : 'No data received';
     return (
       <View style={styles.centered}>
         <Text style={{ color: theme.colors.error, fontWeight: 'bold' }}>
           Failed to load summary stats.
         </Text>
-        <Text style={{ color: theme.colors.outline, marginTop: 8, textAlign: 'center', paddingHorizontal: 24 }}>
-          Verify connection to your backend server.
+        <Text style={{ color: theme.colors.outline, marginTop: 8, textAlign: 'center', paddingHorizontal: 24, fontSize: 11 }}>
+          {errorDetail}
         </Text>
         <Button mode="contained" onPress={() => refetch()} style={{ marginTop: 16, backgroundColor: '#FF6B6B' }}>
           Retry / ਦੁਬਾਰਾ ਕੋਸ਼ਿਸ਼ ਕਰੋ

@@ -3,7 +3,7 @@ import { View, StyleSheet, KeyboardAvoidingView, Platform, ScrollView } from 're
 import { TextInput, Button, Text, Checkbox, useTheme, ActivityIndicator } from 'react-native-paper';
 import { useAuthStore } from '../stores/authStore';
 import axios from 'axios';
-import { API_BASE_URL } from '../services/api';
+import { API_BASE_URL, getFriendlyErrorMessage } from '../services/api';
 
 export const LoginScreen = () => {
   const theme = useTheme();
@@ -59,15 +59,8 @@ export const LoginScreen = () => {
       }
     } catch (err: any) {
       console.error('Login error details:', err);
-      
-      const serverError = err.response?.data?.error;
-      if (serverError) {
-        setError(serverError);
-      } else if (err.code === 'ERR_NETWORK') {
-        setError('ਨੈੱਟਵਰਕ ਕਨੈਕਸ਼ਨ ਅਸਫਲ ਰਿਹਾ। ਸਰਵਰ ਅਤੇ ਨੈੱਟਵਰਕ ਦੀ ਜਾਂਚ ਕਰੋ। (Network connection failed. Verify server is online.)');
-      } else {
-        setError('ਕਨੈਕਸ਼ਨ ਅਸਫਲ ਰਿਹਾ (Backend connection failed. Verify network configuration.)');
-      }
+      const friendlyErr = getFriendlyErrorMessage(err);
+      setError(friendlyErr);
     } finally {
       setLoading(false);
     }

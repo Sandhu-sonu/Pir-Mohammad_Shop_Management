@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { View, StyleSheet, ScrollView } from 'react-native';
 import { Text, Card, Button, Divider, ActivityIndicator, List, useTheme } from 'react-native-paper';
 import { useQuery } from '@tanstack/react-query';
-import { api } from '../services/api';
+import { api, getFriendlyErrorMessage } from '../services/api';
 import { useAuthStore } from '../stores/authStore';
 
 export const SettingsScreen = () => {
@@ -59,8 +59,11 @@ export const SettingsScreen = () => {
       ) : error || !shopSettings ? (
         <Card style={styles.card}>
           <Card.Content>
-            <Text style={{ color: theme.colors.error, textAlign: 'center' }}>
+            <Text style={{ color: theme.colors.error, textAlign: 'center', fontWeight: 'bold' }}>
               Failed to load shop profile data.
+            </Text>
+            <Text style={{ color: theme.colors.outline, textAlign: 'center', marginTop: 8, fontSize: 11 }}>
+              {error ? getFriendlyErrorMessage(error) : 'No settings received'}
             </Text>
           </Card.Content>
         </Card>
