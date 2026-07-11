@@ -19,7 +19,8 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#121212"
       },
-      "package": "com.sandhusonu.prms.owner"
+      "package": "com.sonusandhu.shopmanager",
+      "usesCleartextTraffic": true
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -27,6 +28,11 @@
     "plugins": [
       "expo-secure-store",
       "expo-asset"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "3303960a-2429-4e1a-9677-9db5fe457316"
+      }
+    }
   }
 }
