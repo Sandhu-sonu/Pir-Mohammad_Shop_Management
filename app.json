@@ -4,6 +4,9 @@
       "eas": {
         "projectId": "1dfc8af1-724a-43cd-9cc1-3da9aa5fa71c"
       }
+    },
+    "android": {
+      "package": "com.sonusandhu.shopmanager"
     }
   }
 }
